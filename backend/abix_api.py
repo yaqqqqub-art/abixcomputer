@@ -130,7 +130,7 @@ def record_fail(ip):
 def run_as_desktop(args, timeout=40):
     """Run abix-ctl (or another fixed command) as the desktop user. Returns (rc, stdout, stderr)."""
     env = {"PATH": "/usr/local/bin:/usr/bin:/bin", "HOME": DESK_HOME, "DISPLAY": ":1",
-           "XDG_RUNTIME_DIR": "/tmp/runtime-abix", "LANG": "C.UTF-8"}
+           "XDG_RUNTIME_DIR": os.path.join(DESK_HOME, ".runtime"), "LANG": "C.UTF-8"}
     kw = {}
     if DESK_USER and os.geteuid() == 0:
         kw = {"user": DESK_USER, "group": DESK_USER, "extra_groups": []}
