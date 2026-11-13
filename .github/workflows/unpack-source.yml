@@ -1,8 +1,6 @@
 name: Unpack project source
 on:
   push:
-    paths:
-      - ".github/workflows/unpack-source.yml"
   workflow_dispatch:
 
 permissions:
