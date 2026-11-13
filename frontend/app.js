@@ -78,7 +78,16 @@
     e.preventDefault(); $("l-err").textContent = "";
     api("POST", "/api/login", { username: $("l-user").value, password: $("l-pass").value }).then(function (r) {
       if (r.status === 200) { $("l-pass").value = ""; bootThen("Starting ABIX…", 1300, toDesk); }
-      else { $("l-err").textContent = r.data.error || "login failed"; $("l-pass").select(); }
+      else {
+        var message = r.data && r.data.error;
+        if (!message) {
+          if (r.status === 401) { message = "Username or password does not match the configured ABIX account."; }
+          else if (r.status === 429 || r.status === 503) { message = "Login rate limit reached. Wait 5 minutes, then try once."; }
+          else if (r.status === 0 || r.status >= 500) { message = "Login service is unavailable. Check Blitz Logs for the ABIX API error."; }
+          else { message = "Login request failed (HTTP " + r.status + "). Check the Blitz deployment."; }
+        }
+        $("l-err").textContent = message; $("l-pass").select();
+      }
     });
   });
   $("b-lock").addEventListener("click", function () {
