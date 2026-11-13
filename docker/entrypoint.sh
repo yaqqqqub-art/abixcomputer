@@ -19,6 +19,14 @@ PY
   unset ABIX_INIT_PASSWORD ABIX_PW
 fi
 : "${ABIX_ADMIN_HASH:?ABIX_ADMIN_HASH is not set - set ABIX_INIT_PASSWORD in the app environment or run deployment/init.sh}"
+# Fail early instead of silently accepting a plain-text or malformed hash.
+ABIX_ADMIN_HASH="$ABIX_ADMIN_HASH" python3 - <<'PY'
+import os, re, sys
+value = os.environ["ABIX_ADMIN_HASH"]
+if not re.fullmatch(r"pbkdf2:[1-9][0-9]*:[0-9a-f]{32}:[0-9a-f]{64}", value):
+    print("ABIX_ADMIN_HASH is invalid. Set ABIX_INIT_PASSWORD in Blitz Environment (10+ characters) and redeploy.", file=sys.stderr)
+    sys.exit(1)
+PY
 
 if [ -z "${ABIX_SECRET:-}" ]; then
   SECRET_FILE=/home/abix/.abix-secret
@@ -31,6 +39,7 @@ if [ -z "${ABIX_SECRET:-}" ]; then
 fi
 : "${ABIX_SECRET:?could not create ABIX_SECRET}"
 : "${ABIX_ADMIN_USER:=abixone}"
+echo "[abix] Login username configured: $ABIX_ADMIN_USER"
 
 mkdir -p /home/abix/.config/abix /home/abix/.runtime /home/abix/.vnc /home/abix/Workspace
 mkdir -p /home/abix/Desktop /home/abix/Downloads /home/abix/Documents /home/abix/Pictures
