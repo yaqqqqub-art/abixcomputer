@@ -1,6 +1,5 @@
 name: Unpack project source
 on:
-  push:
   workflow_dispatch:
 
 permissions:
