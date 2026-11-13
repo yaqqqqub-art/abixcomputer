@@ -45,6 +45,9 @@ mkdir -p /home/abix/.config/abix /home/abix/.runtime /home/abix/.vnc /home/abix/
 mkdir -p /home/abix/Desktop /home/abix/Downloads /home/abix/Documents /home/abix/Pictures
 mkdir -p /etc/abix
 chmod 700 /home/abix/.config/abix /home/abix/.runtime
+# Do not inherit an invalid host-provided runtime directory.
+XDG_RUNTIME_DIR=/home/abix/.runtime
+export XDG_RUNTIME_DIR
 
 # One canonical path shared by entrypoint, Supervisor and API.
 ABIX_BACKEND_CONF=/etc/abix/backend.json
