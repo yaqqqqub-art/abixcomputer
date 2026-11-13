@@ -611,6 +611,15 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def load_conf(path=CONF_PATH):
+    # Be compatible with containers built during the config-path migration.
+    if not os.path.isfile(path):
+        candidates = ("/etc/abix/backend.json", "/home/abix/.config/abix/backend.json")
+        fallback = next((p for p in candidates if os.path.isfile(p)), None)
+        if fallback:
+            log("config_path_fallback", requested=path, selected=fallback)
+            path = fallback
+        else:
+            raise SystemExit("backend config not found at %s or compatibility paths" % path)
     with open(path, encoding="utf-8") as f:
         c = json.load(f)
     for k in ("user", "hash", "secret"):
