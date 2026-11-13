@@ -16,7 +16,7 @@ services:
       VNC_PASSWORD: ${VNC_PASSWORD:?run deployment/init.sh first}
       ABIX_ADMIN_USER: ${ABIX_ADMIN_USER:-admin}
       ABIX_ADMIN_HASH: ${ABIX_ADMIN_HASH:?run deployment/init.sh first}
-      ABIX_SECRET: ${ABIX_SECRET:?run deployment/init.sh first}
+      ABIX_SECRET: ${ABIX_SECRET:-}
       ABIX_SESSION_HOURS: ${ABIX_SESSION_HOURS:-8}
       ABIX_FPS: ${ABIX_FPS:-60}                    # screen updates per second (lower = less CPU on a weak server)
       ABIX_APPS_RESTORE: ${ABIX_APPS_RESTORE:-1}   # 1 = apps installed from the App Center come back after the container is re-created
