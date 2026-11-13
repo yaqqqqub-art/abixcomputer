@@ -43,28 +43,31 @@ echo "[abix] Login username configured: $ABIX_ADMIN_USER"
 
 mkdir -p /home/abix/.config/abix /home/abix/.runtime /home/abix/.vnc /home/abix/Workspace
 mkdir -p /home/abix/Desktop /home/abix/Downloads /home/abix/Documents /home/abix/Pictures
+mkdir -p /etc/abix
 chmod 700 /home/abix/.config/abix /home/abix/.runtime
+
+# One canonical path shared by entrypoint, Supervisor and API.
+ABIX_BACKEND_CONF=/etc/abix/backend.json
+export ABIX_BACKEND_CONF
+
 mkdir -p /tmp/nginx-client-body /tmp/nginx-proxy /tmp/nginx-fastcgi /tmp/nginx-uwsgi /tmp/nginx-scgi
 python3 /usr/local/bin/vncpw.py > /home/abix/.vnc/passwd
 chmod 600 /home/abix/.vnc/passwd
 
-# The API and desktop run under the same unprivileged UID 1000 in this restricted host.
-# Keep the config owner-readable only and clear secret environment variables before launching services.
+# Write the configuration to the canonical location before starting any services.
 ( umask 077; python3 - <<'PY'
 import json, os
-path = os.environ.get("ABIX_BACKEND_CONF", "/home/abix/.config/abix/backend.json")
+path = "/etc/abix/backend.json"
 with open(path, "w") as f:
     json.dump({"user": os.environ["ABIX_ADMIN_USER"], "hash": os.environ["ABIX_ADMIN_HASH"],
                "secret": os.environ["ABIX_SECRET"], "vnc_password": os.environ["VNC_PASSWORD"]}, f)
 PY
 )
-chmod 600 "${ABIX_BACKEND_CONF:-/home/abix/.config/abix/backend.json}"
-
-# Compatibility for older API builds that still read /etc/abix/backend.json.
-# /etc/abix is owned by UID 1000 in the Blitz image.
-mkdir -p /etc/abix
-cp "${ABIX_BACKEND_CONF:-/home/abix/.config/abix/backend.json}" /etc/abix/backend.json
 chmod 600 /etc/abix/backend.json
+# Keep a copy for any older component that still reads the home-directory location.
+cp /etc/abix/backend.json /home/abix/.config/abix/backend.json
+chmod 600 /home/abix/.config/abix/backend.json
+echo "[abix] Backend config created at /etc/abix/backend.json"
 unset VNC_PASSWORD ABIX_ADMIN_HASH ABIX_SECRET ABIX_ADMIN_USER
 
 export DESKTOP_GEOMETRY
