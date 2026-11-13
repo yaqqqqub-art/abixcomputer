@@ -4,7 +4,18 @@ set -euo pipefail
 : "${VNC_PASSWORD:?VNC_PASSWORD is not set}"
 : "${DESKTOP_GEOMETRY:=1280x800}"
 : "${ABIX_ADMIN_HASH:?ABIX_ADMIN_HASH is not set - run deployment/init.sh}"
-: "${ABIX_SECRET:?ABIX_SECRET is not set - run deployment/init.sh}"
+# Generate the internal session secret on first boot and keep it in the persistent home volume.
+# This lets managed hosts such as blitz.cloud start without a manually supplied ABIX_SECRET.
+if [ -z "${ABIX_SECRET:-}" ]; then
+  SECRET_FILE=/home/abix/.abix-secret
+  if [ -s "$SECRET_FILE" ]; then
+    ABIX_SECRET="$(cat "$SECRET_FILE")"
+  else
+    ABIX_SECRET="$(openssl rand -hex 32)"
+    ( umask 077; printf '%s' "$ABIX_SECRET" > "$SECRET_FILE" )
+  fi
+fi
+: "${ABIX_SECRET:?could not create ABIX_SECRET}"
 : "${ABIX_ADMIN_USER:=admin}"
 
 # Persistent home volume may be created root-owned; fix ownership once.
