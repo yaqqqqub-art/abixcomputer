@@ -611,7 +611,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def load_conf(path=CONF_PATH):
-    # Be compatible with containers built during the config-path migration.
+    # First use a config written by entrypoint.sh.
     if not os.path.isfile(path):
         candidates = ("/etc/abix/backend.json", "/home/abix/.config/abix/backend.json")
         fallback = next((p for p in candidates if os.path.isfile(p)), None)
@@ -619,7 +619,42 @@ def load_conf(path=CONF_PATH):
             log("config_path_fallback", requested=path, selected=fallback)
             path = fallback
         else:
-            raise SystemExit("backend config not found at %s or compatibility paths" % path)
+            # Some managed hosts generate their own Dockerfile and may bypass the
+            # repository ENTRYPOINT. Recover from injected environment variables
+            # so the API can still start rather than leaving Nginx with a 502.
+            user = (os.environ.get("ABIX_ADMIN_USER") or "abixone").strip()
+            stored_hash = os.environ.get("ABIX_ADMIN_HASH", "")
+            init_password = os.environ.get("ABIX_INIT_PASSWORD", "")
+            if not stored_hash and init_password:
+                if len(init_password) < 10 or len(init_password) > 256:
+                    raise SystemExit("ABIX_INIT_PASSWORD must be 10-256 characters")
+                stored_hash = make_hash(init_password)
+            if not re.fullmatch(r"pbkdf2:[1-9][0-9]*:[0-9a-f]{32}:[0-9a-f]{64}", stored_hash):
+                raise SystemExit("backend config missing; set ABIX_INIT_PASSWORD (10+ characters) or a valid ABIX_ADMIN_HASH")
+            secret = os.environ.get("ABIX_SECRET", "")
+            if not secret:
+                secret_file = "/home/abix/.abix-secret"
+                try:
+                    os.makedirs(os.path.dirname(secret_file), exist_ok=True)
+                    if os.path.isfile(secret_file):
+                        with open(secret_file, encoding="utf-8") as f:
+                            secret = f.read().strip()
+                    else:
+                        secret = secrets.token_hex(32)
+                        fd = os.open(secret_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                        with os.fdopen(fd, "w", encoding="utf-8") as f:
+                            f.write(secret)
+                except FileExistsError:
+                    with open(secret_file, encoding="utf-8") as f:
+                        secret = f.read().strip()
+                except OSError as e:
+                    raise SystemExit("could not create session secret: %s" % e)
+            vnc_password = os.environ.get("VNC_PASSWORD", "")
+            if not user or len(secret) < 32 or not vnc_password:
+                raise SystemExit("backend config missing required ABIX_ADMIN_USER, ABIX_SECRET (32+ chars), or VNC_PASSWORD")
+            c = {"user": user, "hash": stored_hash, "secret": secret, "vnc_password": vnc_password}
+            log("config_bootstrapped_from_environment", source="environment")
+            return c
     with open(path, encoding="utf-8") as f:
         c = json.load(f)
     for k in ("user", "hash", "secret"):
