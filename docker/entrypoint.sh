@@ -32,8 +32,9 @@ fi
 : "${ABIX_SECRET:?could not create ABIX_SECRET}"
 : "${ABIX_ADMIN_USER:=admin}"
 
-mkdir -p /home/abix/.vnc /home/abix/Workspace
+mkdir -p /home/abix/.config/abix /home/abix/.runtime /home/abix/.vnc /home/abix/Workspace
 mkdir -p /home/abix/Desktop /home/abix/Downloads /home/abix/Documents /home/abix/Pictures
+chmod 700 /home/abix/.config/abix /home/abix/.runtime
 mkdir -p /tmp/nginx-client-body /tmp/nginx-proxy /tmp/nginx-fastcgi /tmp/nginx-uwsgi /tmp/nginx-scgi
 python3 /usr/local/bin/vncpw.py > /home/abix/.vnc/passwd
 chmod 600 /home/abix/.vnc/passwd
@@ -42,12 +43,13 @@ chmod 600 /home/abix/.vnc/passwd
 # Keep the config owner-readable only and clear secret environment variables before launching services.
 ( umask 077; python3 - <<'PY'
 import json, os
-with open("/etc/abix/backend.json", "w") as f:
+path = os.environ.get("ABIX_BACKEND_CONF", "/home/abix/.config/abix/backend.json")
+with open(path, "w") as f:
     json.dump({"user": os.environ["ABIX_ADMIN_USER"], "hash": os.environ["ABIX_ADMIN_HASH"],
                "secret": os.environ["ABIX_SECRET"], "vnc_password": os.environ["VNC_PASSWORD"]}, f)
 PY
 )
-chmod 600 /etc/abix/backend.json
+chmod 600 "${ABIX_BACKEND_CONF:-/home/abix/.config/abix/backend.json}"
 unset VNC_PASSWORD ABIX_ADMIN_HASH ABIX_SECRET ABIX_ADMIN_USER
 
 export DESKTOP_GEOMETRY
