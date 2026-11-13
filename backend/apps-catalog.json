@@ -1,0 +1,31 @@
+{
+  "_comment": "ABIX App Center catalog. kind=apt installs Ubuntu packages as root; kind=deb downloads a vendor .deb (fixed URL, root install); Windows setup .exe/.msi files are NOT listed here - they are downloaded from a link you paste into the App Center and run unprivileged in Wine. Add your own entries: id (a-z0-9-), name, desc, category, kind, packages/url, check (command that exists once installed), remove (packages to remove), arch (optional list).",
+  "apps": [
+    {"id": "google-chrome", "name": "Google Chrome", "desc": "Google's web browser.", "category": "Internet", "kind": "deb",
+     "url": "https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb", "check": "google-chrome-stable", "remove": ["google-chrome-stable"], "arch": ["amd64"]},
+    {"id": "vscode", "name": "Visual Studio Code", "desc": "Code editor.", "category": "Development", "kind": "deb",
+     "url": "https://update.code.visualstudio.com/latest/linux-deb-x64/stable", "check": "code", "remove": ["code"], "arch": ["amd64"]},
+    {"id": "vlc", "name": "VLC media player", "desc": "Plays almost every video and audio format.", "category": "Media", "kind": "apt",
+     "packages": ["vlc"], "check": "vlc", "remove": ["vlc"]},
+    {"id": "libreoffice", "name": "LibreOffice", "desc": "Word processor, spreadsheet and presentations (opens .docx, .xlsx, .pptx).", "category": "Office", "kind": "apt",
+     "packages": ["libreoffice-writer", "libreoffice-calc", "libreoffice-impress"], "check": "libreoffice", "remove": ["libreoffice-writer", "libreoffice-calc", "libreoffice-impress"]},
+    {"id": "gimp", "name": "GIMP", "desc": "Photo and image editor.", "category": "Graphics", "kind": "apt",
+     "packages": ["gimp"], "check": "gimp", "remove": ["gimp"]},
+    {"id": "inkscape", "name": "Inkscape", "desc": "Vector graphics editor.", "category": "Graphics", "kind": "apt",
+     "packages": ["inkscape"], "check": "inkscape", "remove": ["inkscape"]},
+    {"id": "krita", "name": "Krita", "desc": "Digital painting.", "category": "Graphics", "kind": "apt",
+     "packages": ["krita"], "check": "krita", "remove": ["krita"]},
+    {"id": "audacity", "name": "Audacity", "desc": "Audio recorder and editor.", "category": "Media", "kind": "apt",
+     "packages": ["audacity"], "check": "audacity", "remove": ["audacity"]},
+    {"id": "kdenlive", "name": "Kdenlive", "desc": "Video editor.", "category": "Media", "kind": "apt",
+     "packages": ["kdenlive"], "check": "kdenlive", "remove": ["kdenlive"]},
+    {"id": "filezilla", "name": "FileZilla", "desc": "FTP / SFTP client.", "category": "Internet", "kind": "apt",
+     "packages": ["filezilla"], "check": "filezilla", "remove": ["filezilla"]},
+    {"id": "transmission", "name": "Transmission", "desc": "Torrent client.", "category": "Internet", "kind": "apt",
+     "packages": ["transmission-gtk"], "check": "transmission-gtk", "remove": ["transmission-gtk"]},
+    {"id": "htop", "name": "htop", "desc": "Process viewer for the terminal.", "category": "System", "kind": "apt",
+     "packages": ["htop"], "check": "htop", "remove": ["htop"]},
+    {"id": "screenshooter", "name": "Screenshot Tool", "desc": "Capture the screen or a window.", "category": "System", "kind": "apt",
+     "packages": ["xfce4-screenshooter"], "check": "xfce4-screenshooter", "remove": ["xfce4-screenshooter"]}
+  ]
+}

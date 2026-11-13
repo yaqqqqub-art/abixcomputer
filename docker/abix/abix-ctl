@@ -1,0 +1,789 @@
+#!/usr/bin/env python3
+"""abix-ctl - one control tool for the Abix desktop look & feel (Stage 1).
+
+Runs as the desktop user (abix). Uses only the Python standard library.
+Stage 2 (web Settings app) will call this same tool, so every input is validated
+and no command is ever run through a shell.
+
+Commands:
+  status                    print settings + what is really active (JSON)
+  seed [--force]            first-run / reset: write panel, Start menu, desktop icons, terminal colours
+  apply                     apply saved settings to the running session (theme, wallpaper, animation, snapping)
+  theme light|dark          switch light / dark mode
+  anim off|light|full       set animation level
+  accent '#RRGGBB'          set accent colour
+  wallpaper PATH            set wallpaper (file must be in an allowed folder)
+  wallpaper-add PATH        copy a picture into ~/Pictures/Wallpapers and use it
+  get-theme                 print the GTK theme the running session really uses
+  restart-session           sign out; supervisord starts a fresh desktop session
+"""
+import glob
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+import xml.sax.saxutils as xs
+
+PROFILE_VERSION = "stage1-2"
+HOME = os.environ.get("ABIX_HOME") or os.path.expanduser("~")
+CFG = os.path.join(HOME, ".config", "abix")
+SETTINGS = os.path.join(CFG, "settings.env")
+STATE = os.path.join(CFG, "state.json")
+MARKER = os.path.join(CFG, "profile-version")
+SYS_WALLS = "/usr/share/backgrounds/abix"
+USER_WALLS = os.path.join(HOME, "Pictures", "Wallpapers")
+ALLOWED_WALL_DIRS = [SYS_WALLS, USER_WALLS, os.path.join(HOME, "Pictures"), os.path.join(HOME, "Downloads")]
+IMG_EXT = (".jpg", ".jpeg", ".png", ".webp", ".bmp")
+MAX_WALL_BYTES = 30 * 1024 * 1024
+
+THEMES = ("light", "dark")
+ANIMS = ("off", "light", "full")
+DEFAULTS = {
+    "THEME": os.environ.get("ABIX_DEFAULT_THEME", "light"),
+    "ANIMATION": os.environ.get("ABIX_DEFAULT_ANIMATION", "light"),
+    "ACCENT": "#0067c0",
+    "WALLPAPER": SYS_WALLS + "/abix-bloom-light.jpg",
+}
+if DEFAULTS["THEME"] not in THEMES:
+    DEFAULTS["THEME"] = "light"
+if DEFAULTS["ANIMATION"] not in ANIMS:
+    DEFAULTS["ANIMATION"] = "light"
+
+
+# ----------------------------------------------------------------- settings
+def load_settings():
+    s = dict(DEFAULTS)
+    try:
+        with open(SETTINGS, encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    if k in DEFAULTS:
+                        s[k] = v.strip()
+    except OSError:
+        pass
+    # sanitise whatever is on disk
+    if s["THEME"] not in THEMES:
+        s["THEME"] = DEFAULTS["THEME"]
+    if s["ANIMATION"] not in ANIMS:
+        s["ANIMATION"] = DEFAULTS["ANIMATION"]
+    if not re.fullmatch(r"#[0-9a-fA-F]{6}", s["ACCENT"]):
+        s["ACCENT"] = DEFAULTS["ACCENT"]
+    return s
+
+
+def save_settings(s):
+    os.makedirs(CFG, exist_ok=True)
+    tmp = SETTINGS + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write("# Abix desktop settings (edited by abix-ctl / the Settings app)\n")
+        for k in ("THEME", "ANIMATION", "ACCENT", "WALLPAPER"):
+            f.write("%s=%s\n" % (k, s[k]))
+    os.replace(tmp, SETTINGS)
+
+
+def save_state(d):
+    os.makedirs(CFG, exist_ok=True)
+    with open(STATE, "w", encoding="utf-8") as f:
+        json.dump(d, f)
+
+
+def load_state():
+    try:
+        with open(STATE, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+# ----------------------------------------------------------------- session / xfconf helpers
+def session_env():
+    """Environment with DISPLAY + DBUS_SESSION_BUS_ADDRESS of the running Xfce session."""
+    env = dict(os.environ)
+    env.setdefault("DISPLAY", ":1")
+    if env.get("DBUS_SESSION_BUS_ADDRESS"):
+        return env
+    uid = os.getuid()
+    for p in glob.glob("/proc/[0-9]*"):
+        try:
+            if os.stat(p).st_uid != uid:
+                continue
+            with open(p + "/comm") as f:
+                if f.read().strip() != "xfce4-session":
+                    continue
+            with open(p + "/environ", "rb") as f:
+                for item in f.read().split(b"\0"):
+                    k, _, v = item.partition(b"=")
+                    if k in (b"DBUS_SESSION_BUS_ADDRESS", b"DISPLAY", b"XDG_RUNTIME_DIR"):
+                        env[k.decode()] = v.decode()
+            return env
+        except OSError:
+            continue
+    return env
+
+
+def run(args, env=None, timeout=15):
+    """Run a command (list form, never a shell). Returns (returncode, stdout)."""
+    try:
+        r = subprocess.run(args, env=env or session_env(), capture_output=True, text=True, timeout=timeout)
+        return r.returncode, (r.stdout or "").strip()
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return 127, str(e)
+
+
+def have(cmd):
+    return shutil.which(cmd) is not None
+
+
+def xset(channel, prop, typ, value):
+    """Set an xfconf property (creating it when missing). typ: string|int|uint|bool|double"""
+    if isinstance(value, bool):
+        value = "true" if value else "false"
+    rc, out = run(["xfconf-query", "-c", channel, "-p", prop, "-n", "-t", typ, "-s", str(value)])
+    return rc == 0
+
+
+def xset_array(channel, prop, typ, values):
+    cmd = ["xfconf-query", "-c", channel, "-p", prop, "-n", "-a"]
+    for v in values:
+        cmd += ["-t", typ, "-s", str(v)]
+    rc, _ = run(cmd)
+    return rc == 0
+
+
+# ----------------------------------------------------------------- what is installed?
+def theme_dirs():
+    return ["/usr/share/themes", os.path.join(HOME, ".themes"), os.path.join(HOME, ".local/share/themes")]
+
+
+def find_theme(names_regex, need_subdir):
+    """First theme dir whose name matches regex and has a given sub folder (gtk-3.0 / xfwm4)."""
+    cands = []
+    for d in theme_dirs():
+        for p in sorted(glob.glob(d + "/*")):
+            n = os.path.basename(p)
+            if re.search(names_regex, n) and os.path.isdir(os.path.join(p, need_subdir)):
+                cands.append(n)
+    # prefer "round" variants, then shorter names
+    cands.sort(key=lambda n: (0 if "round" in n.lower() else 1, len(n)))
+    return cands[0] if cands else None
+
+
+def pick_gtk_theme(mode):
+    if mode == "dark":
+        return (find_theme(r"(?i)^Fluent.*dark", "gtk-3.0") or find_theme(r"^Arc-Dark$", "gtk-3.0")
+                or find_theme(r"^Adwaita-dark$", "gtk-3.0") or "Adwaita")
+    return (find_theme(r"(?i)^Fluent(?!.*dark).*light", "gtk-3.0") or find_theme(r"^Arc$", "gtk-3.0")
+            or find_theme(r"^Adwaita$", "gtk-3.0") or "Adwaita")
+
+
+def pick_wm_theme(mode, gtk_theme):
+    if os.path.isdir("/usr/share/themes/%s/xfwm4" % gtk_theme):
+        return gtk_theme
+    alt = "Arc-Dark" if mode == "dark" else "Arc"
+    if os.path.isdir("/usr/share/themes/%s/xfwm4" % alt):
+        return alt
+    return "Default"
+
+
+def icon_theme_exists(n):
+    return os.path.isdir("/usr/share/icons/" + n)
+
+
+def pick_icons(mode):
+    if mode == "dark" and icon_theme_exists("Papirus-Dark"):
+        return "Papirus-Dark"
+    if icon_theme_exists("Papirus"):
+        return "Papirus"
+    return "Adwaita"
+
+
+def pick_cursor():
+    for n in ("DMZ-White", "DMZ-Black", "Adwaita"):
+        if icon_theme_exists(n):
+            return n
+    return "default"
+
+
+def pick_font():
+    rc, out = run(["fc-list", ":", "family"])
+    fams = out.lower() if rc == 0 else ""
+    if "inter" in fams:
+        return "Inter 10"
+    if "noto sans" in fams:
+        return "Noto Sans 10"
+    return "Sans 10"
+
+
+def pick_mono():
+    rc, out = run(["fc-list", ":", "family"])
+    fams = out.lower() if rc == 0 else ""
+    if "fira code" in fams:
+        return "Fira Code 11"
+    return "Monospace 11"
+
+
+def has_whisker():
+    return bool(glob.glob("/usr/lib/*/xfce4/panel/plugins/libwhiskermenu.so") or
+                glob.glob("/usr/lib/xfce4/panel/plugins/libwhiskermenu.so"))
+
+
+# ----------------------------------------------------------------- appearance
+def panel_rgba(mode):
+    return (0.125, 0.125, 0.125, 0.90) if mode == "dark" else (0.953, 0.953, 0.953, 0.90)
+
+
+def write_gtk_css(mode, accent):
+    """User CSS: rounded corners + accent colour on top of whatever GTK theme is active (best effort)."""
+    d = os.path.join(HOME, ".config", "gtk-3.0")
+    os.makedirs(d, exist_ok=True)
+    css = """/* generated by abix-ctl - do not edit; change the accent in Personalization */
+@define-color abix_accent %(a)s;
+@define-color theme_selected_bg_color %(a)s;
+@define-color theme_selected_fg_color #ffffff;
+button, entry, spinbutton, combobox button, .menu, menu, popover, tooltip { border-radius: 8px; }
+menuitem, .menuitem, modelbutton { border-radius: 6px; }
+button.suggested-action, button.suggested-action:hover { background-image: none; background-color: %(a)s; color: #ffffff; border-color: %(a)s; }
+selection, *:selected, row:selected, treeview.view:selected, iconview:selected { background-color: %(a)s; color: #ffffff; }
+switch:checked, check:checked, radio:checked { background-image: none; background-color: %(a)s; border-color: %(a)s; color: #ffffff; }
+progressbar progress, scale highlight, scale trough highlight { background-image: none; background-color: %(a)s; border-color: %(a)s; }
+""" % {"a": accent}
+    with open(os.path.join(d, "gtk.css"), "w", encoding="utf-8") as f:
+        f.write(css)
+
+
+def apply_theme(s):
+    mode = s["THEME"]
+    gtk = pick_gtk_theme(mode)
+    wm = pick_wm_theme(mode, gtk)
+    ok = True
+    ok &= xset("xsettings", "/Net/ThemeName", "string", gtk)
+    ok &= xset("xsettings", "/Net/IconThemeName", "string", pick_icons(mode))
+    ok &= xset("xsettings", "/Gtk/CursorThemeName", "string", pick_cursor())
+    ok &= xset("xsettings", "/Gtk/CursorThemeSize", "int", 24)
+    ok &= xset("xsettings", "/Gtk/FontName", "string", pick_font())
+    ok &= xset("xsettings", "/Xft/Antialias", "int", 1)
+    ok &= xset("xsettings", "/Xft/HintStyle", "string", "hintslight")
+    ok &= xset("xsettings", "/Xft/RGBA", "string", "none")
+    ok &= xset("xfwm4", "/general/theme", "string", wm)
+    ok &= xset("xfwm4", "/general/title_font", "string", pick_font().replace(" 10", " Bold 10"))
+    r, g, b, a = panel_rgba(mode)
+    xset("xfce4-panel", "/panels/panel-1/background-style", "uint", 1)
+    xset_array("xfce4-panel", "/panels/panel-1/background-rgba", "double", [r, g, b, a])
+    write_gtk_css(mode, s["ACCENT"])
+    return {"gtk_theme": gtk, "wm_theme": wm, "icon_theme": pick_icons(mode), "cursor": pick_cursor(), "ok": bool(ok)}
+
+
+def apply_wm_behaviour():
+    """Window snapping, virtual desktops, Windows-style title bar buttons (right side)."""
+    for prop, typ, val in [
+        ("/general/tile_on_move", "bool", True),        # drag to screen edge = snap half / maximise
+        ("/general/snap_to_border", "bool", True),
+        ("/general/snap_to_windows", "bool", False),
+        ("/general/snap_width", "int", 12),
+        ("/general/workspace_count", "int", 4),         # 4 virtual desktops (Ctrl+Alt+Left/Right)
+        ("/general/button_layout", "string", "|HMC"),   # minimise, maximise, close on the right
+        ("/general/title_alignment", "string", "left"),
+        ("/general/double_click_action", "string", "maximize"),
+        ("/general/cycle_preview", "bool", True),       # Alt+Tab shows previews when compositor is on
+    ]:
+        xset("xfwm4", prop, typ, val)
+    # desktop icons: Home + Trash like a normal desktop
+    for prop, typ, val in [
+        ("/desktop-icons/style", "int", 2),
+        ("/desktop-icons/icon-size", "int", 48),
+        ("/desktop-icons/file-icons/show-home", "bool", True),
+        ("/desktop-icons/file-icons/show-trash", "bool", True),
+        ("/desktop-icons/file-icons/show-filesystem", "bool", False),
+        ("/desktop-icons/file-icons/show-removable", "bool", False),
+    ]:
+        xset("xfce4-desktop", prop, typ, val)
+    # keyboard shortcuts: Super = Start menu, Super+E = files
+    start_cmd = "xfce4-popup-whiskermenu" if has_whisker() else "xfce4-popup-applicationsmenu"
+    xset("xfce4-keyboard-shortcuts", "/commands/custom/Super_L", "string", start_cmd)
+    xset("xfce4-keyboard-shortcuts", "/commands/custom/<Super>e", "string", "thunar")
+    xset("xfce4-keyboard-shortcuts", "/commands/custom/override", "bool", True)
+
+
+# ----------------------------------------------------------------- wallpaper
+def wall_ok(path):
+    try:
+        rp = os.path.realpath(path)
+    except OSError:
+        return False
+    if not rp.lower().endswith(IMG_EXT) or not os.path.isfile(rp):
+        return False
+    if os.path.getsize(rp) > MAX_WALL_BYTES:
+        return False
+    return any(rp == os.path.realpath(d) or rp.startswith(os.path.realpath(d) + os.sep) for d in ALLOWED_WALL_DIRS)
+
+
+def apply_wallpaper(path):
+    if not wall_ok(path):
+        return False
+    props = []
+    rc, out = run(["xfconf-query", "-c", "xfce4-desktop", "-l"])
+    if rc == 0:
+        props = [p for p in out.splitlines() if p.endswith("/last-image")]
+    for mon in ("monitorVNC-0", "monitor0"):
+        for ws in range(0, 4):
+            p = "/backdrop/screen0/%s/workspace%d/last-image" % (mon, ws)
+            if p not in props:
+                props.append(p)
+    for p in props:
+        base = p.rsplit("/", 1)[0]
+        xset("xfce4-desktop", p, "string", path)
+        xset("xfce4-desktop", base + "/image-style", "int", 5)       # 5 = zoomed
+        xset("xfce4-desktop", base + "/color-style", "int", 0)
+    run(["xfdesktop", "--reload"])
+    return True
+
+
+# ----------------------------------------------------------------- animations / compositor
+PICOM_COMMON = """# generated by abix-ctl (level: %(level)s) - picom 10.x syntax
+backend = "xrender";
+vsync = false;
+detect-client-opacity = true;
+detect-transient = true;
+use-damage = true;
+log-level = "warn";
+fading = true;
+fade-in-step = %(fade)s;
+fade-out-step = %(fade)s;
+fade-delta = 8;
+"""
+PICOM_FULL = """shadow = true;
+shadow-radius = 16;
+shadow-offset-x = -12;
+shadow-offset-y = -10;
+shadow-opacity = 0.32;
+shadow-exclude = [ "window_type = 'dock'", "window_type = 'desktop'", "_GTK_FRAME_EXTENTS@:c" ];
+corner-radius = 10;
+rounded-corners-exclude = [ "window_type = 'dock'", "window_type = 'desktop'",
+                            "_NET_WM_STATE@:32a *= '_NET_WM_STATE_FULLSCREEN'",
+                            "_NET_WM_STATE@:32a *= '_NET_WM_STATE_MAXIMIZED_VERT'" ];
+"""
+
+
+def composite_available():
+    if not have("xdpyinfo"):
+        return True  # cannot check; try and verify by process
+    rc, out = run(["xdpyinfo"])
+    return rc == 0 and "composite" in out.lower()
+
+
+def kill_picom():
+    run(["pkill", "-u", str(os.getuid()), "-x", "picom"])
+    time.sleep(0.4)
+
+
+def picom_running():
+    rc, _ = run(["pgrep", "-u", str(os.getuid()), "-x", "picom"])
+    return rc == 0
+
+
+def try_picom(level):
+    os.makedirs(CFG, exist_ok=True)
+    conf = os.path.join(CFG, "picom.conf")
+    text = PICOM_COMMON % {"level": level, "fade": "0.08" if level == "full" else "0.12"}
+    if level == "full":
+        text += PICOM_FULL
+    with open(conf, "w", encoding="utf-8") as f:
+        f.write(text)
+    log = open(os.path.join(CFG, "picom.log"), "ab")
+    try:
+        subprocess.Popen(["picom", "--config", conf], env=session_env(), stdout=log, stderr=log,
+                         stdin=subprocess.DEVNULL, start_new_session=True)
+    except OSError as e:
+        return False, str(e)
+    for _ in range(8):
+        time.sleep(0.4)
+        if picom_running():
+            time.sleep(0.8)          # still alive after a moment? (picom exits at once on errors)
+            if picom_running():
+                return True, ""
+    return False, "picom exited; see ~/.config/abix/picom.log"
+
+
+def apply_animation(level):
+    """Returns what is REALLY active, never what we hoped for."""
+    kill_picom()
+    if level == "off":
+        xset("xfwm4", "/general/use_compositing", "bool", False)
+        return {"requested": level, "effective": "off", "reason": ""}
+    reason = ""
+    if not have("picom"):
+        reason = "picom is not installed in this image"
+    elif not composite_available():
+        reason = "X server has no Composite extension"
+    else:
+        xset("xfwm4", "/general/use_compositing", "bool", False)   # picom takes over
+        order = ["full", "light"] if level == "full" else ["light"]
+        for lv in order:
+            ok, why = try_picom(lv)
+            if ok:
+                note = "" if lv == level else "full failed (%s), using light" % reason_short(why)
+                return {"requested": level, "effective": "picom-" + lv, "reason": note}
+            reason = why
+            kill_picom()
+    # fallback: Xfce's own compositor (shadows/transparency, no fade animation)
+    ok = xset("xfwm4", "/general/use_compositing", "bool", True)
+    xset("xfwm4", "/general/show_dock_shadow", "bool", True)
+    return {"requested": level, "effective": "xfwm4-compositor" if ok else "off",
+            "reason": "picom unavailable: " + reason}
+
+
+def reason_short(s):
+    return (s or "")[:80]
+
+
+# ----------------------------------------------------------------- seeding (panel, start menu, icons)
+def desktop_candidates():
+    # name in menu -> list of possible .desktop file names (first existing wins)
+    return [
+        ["firefox.desktop"],
+        ["thunar.desktop", "org.xfce.thunar.desktop"],
+        ["xfce4-terminal.desktop", "org.xfce.terminal.desktop"],
+        ["mousepad.desktop", "org.xfce.mousepad.desktop"],
+        ["org.gnome.Calculator.desktop", "gnome-calculator.desktop"],
+        ["org.gnome.Evince.desktop", "evince.desktop"],
+        ["xfce4-taskmanager.desktop", "org.xfce.taskmanager.desktop"],
+        ["abix-personalize.desktop"],
+    ]
+
+
+def resolve_desktop(names):
+    for n in names:
+        for base in ("/usr/share/applications", os.path.join(HOME, ".local/share/applications")):
+            p = os.path.join(base, n)
+            if os.path.isfile(p):
+                return n, p
+    return None, None
+
+
+def backup_old_config():
+    src = os.path.join(HOME, ".config", "xfce4")
+    if not os.path.isdir(src):
+        return None
+    dst = os.path.join(CFG, "backup-" + time.strftime("%Y%m%d-%H%M%S"))
+    os.makedirs(dst, exist_ok=True)
+    shutil.copytree(src, os.path.join(dst, "xfce4"), dirs_exist_ok=True)
+    return dst
+
+
+def gen_panel(mode):
+    """Write xfce4-panel.xml, launcher folders and Whisker (Start menu) settings."""
+    xml_dir = os.path.join(HOME, ".config/xfce4/xfconf/xfce-perchannel-xml")
+    panel_dir = os.path.join(HOME, ".config/xfce4/panel")
+    os.makedirs(xml_dir, exist_ok=True)
+    shutil.rmtree(panel_dir, ignore_errors=True)
+    os.makedirs(panel_dir, exist_ok=True)
+
+    whisker = has_whisker()
+    pinned = []
+    for names in desktop_candidates():
+        n, p = resolve_desktop(names)
+        if n:
+            pinned.append((n, p))
+    favs = ",".join(n for n, _ in pinned)
+
+    plugins = []   # (id, type, extra-xml)
+    nid = [0]
+
+    def add(ptype, extra=""):
+        nid[0] += 1
+        plugins.append((nid[0], ptype, extra))
+        return nid[0]
+
+    add("separator", '<property name="expand" type="bool" value="true"/><property name="style" type="uint" value="0"/>')
+    if whisker:
+        start_id = add("whiskermenu")
+        search_id = add("whiskermenu")
+    else:
+        start_id = add("applicationsmenu", '<property name="show-button-title" type="bool" value="false"/>'
+                                           '<property name="button-icon" type="string" value="abix-start"/>')
+        search_id = None
+        if resolve_desktop(["xfce4-appfinder.desktop", "org.xfce.appfinder.desktop"])[0]:
+            n, p = resolve_desktop(["xfce4-appfinder.desktop", "org.xfce.appfinder.desktop"])
+            lid = add("launcher", '<property name="items" type="array"><value type="string" value="%s"/></property>' % xs.escape(n))
+            ld = os.path.join(panel_dir, "launcher-%d" % lid)
+            os.makedirs(ld, exist_ok=True)
+            shutil.copy(p, os.path.join(ld, n))
+    for n, p in pinned:
+        if n == "abix-personalize.desktop":
+            continue  # reachable from Start menu and desktop; keep the taskbar short
+        lid = add("launcher", '<property name="items" type="array"><value type="string" value="%s"/></property>' % xs.escape(n))
+        ld = os.path.join(panel_dir, "launcher-%d" % lid)
+        os.makedirs(ld, exist_ok=True)
+        shutil.copy(p, os.path.join(ld, n))
+    add("tasklist", '<property name="show-labels" type="bool" value="false"/>'
+                    '<property name="flat-buttons" type="bool" value="true"/>'
+                    '<property name="show-handle" type="bool" value="false"/>'
+                    '<property name="grouping" type="uint" value="1"/>'
+                    '<property name="middle-button-behavior" type="uint" value="2"/>')
+    add("separator", '<property name="expand" type="bool" value="true"/><property name="style" type="uint" value="0"/>')
+    add("systray", '<property name="square-icons" type="bool" value="true"/><property name="icon-size" type="int" value="20"/>')
+    add("clock", '<property name="mode" type="uint" value="2"/><property name="digital-layout" type="uint" value="4"/>'
+                 '<property name="digital-time-format" type="string" value="%I:%M %p%n%d/%m/%Y"/>')
+    add("showdesktop")
+
+    r, g, b, a = panel_rgba(mode)
+    ids = "".join('<value type="int" value="%d"/>' % pid for pid, _, _ in plugins)
+    pl = "".join('<property name="plugin-%d" type="string" value="%s">%s</property>\n    ' % (pid, t, extra) if extra
+                 else '<property name="plugin-%d" type="string" value="%s"/>\n    ' % (pid, t) for pid, t, extra in plugins)
+    xml = """<?xml version="1.0" encoding="UTF-8"?>
+<channel name="xfce4-panel" version="1.0">
+  <property name="configver" type="int" value="2"/>
+  <property name="panels" type="array">
+    <value type="int" value="1"/>
+    <property name="panel-1" type="empty">
+      <property name="position" type="string" value="p=10;x=0;y=0"/>
+      <property name="length" type="uint" value="100"/>
+      <property name="position-locked" type="bool" value="true"/>
+      <property name="size" type="uint" value="48"/>
+      <property name="icon-size" type="uint" value="0"/>
+      <property name="nrows" type="uint" value="1"/>
+      <property name="mode" type="uint" value="0"/>
+      <property name="background-style" type="uint" value="1"/>
+      <property name="background-rgba" type="array">
+        <value type="double" value="%s"/><value type="double" value="%s"/><value type="double" value="%s"/><value type="double" value="%s"/>
+      </property>
+      <property name="plugin-ids" type="array">%s</property>
+    </property>
+  </property>
+  <property name="plugins" type="empty">
+    %s</property>
+</channel>
+""" % (r, g, b, a, ids, pl)
+    with open(os.path.join(xml_dir, "xfce4-panel.xml"), "w", encoding="utf-8") as f:
+        f.write(xml)
+
+    if whisker:
+        common = (
+            "favorites=%(favs)s\n"
+            "recent=\n"
+            "display-recent=true\n"
+            "button-icon=%(icon)s\n"
+            "button-single-row=false\n"
+            "show-button-title=%(title)s\n"
+            "button-title=%(btitle)s\n"
+            "show-button-icon=true\n"
+            "launcher-show-name=true\n"
+            "launcher-show-description=false\n"
+            "launcher-show-tooltip=true\n"
+            "item-icon-size=3\n"
+            "hover-switch-category=false\n"
+            "category-show-name=true\n"
+            "category-icon-size=1\n"
+            "load-hierarchy=false\n"
+            "view-as-icons=false\n"
+            "default-category=0\n"
+            "recent-items-max=10\n"
+            "favorites-in-recent=false\n"
+            "position-search-alternate=false\n"
+            "position-commands-alternate=true\n"
+            "position-categories-alternate=false\n"
+            "stay-on-focus-out=false\n"
+            "confirm-session-command=true\n"
+            "menu-width=560\n"
+            "menu-height=620\n"
+            "menu-opacity=96\n"
+            "command-settings=abix-personalize\n"
+            "show-command-settings=true\n"
+            "show-command-lockscreen=false\n"       # real lock screen arrives in Stage 2
+            "show-command-switchuser=false\n"
+            "show-command-logout=true\n"
+            "command-logout=xfce4-session-logout --logout --fast\n"
+            "show-command-shutdown=false\n"
+            "show-command-restart=false\n"
+            "show-command-suspend=false\n"
+            "show-command-hibernate=false\n"
+            "show-command-menueditor=false\n"
+            "show-command-profile=false\n"
+        )
+        with open(os.path.join(panel_dir, "whiskermenu-%d.rc" % start_id), "w", encoding="utf-8") as f:
+            f.write(common % {"favs": favs, "icon": "abix-start", "title": "false", "btitle": "Start"})
+        if search_id:
+            with open(os.path.join(panel_dir, "whiskermenu-%d.rc" % search_id), "w", encoding="utf-8") as f:
+                f.write(common % {"favs": favs, "icon": "system-search", "title": "true", "btitle": " Search"})
+    return {"whisker": whisker, "pinned": [n for n, _ in pinned]}
+
+
+def gen_desktop_icons():
+    d = os.path.join(HOME, "Desktop")
+    os.makedirs(d, exist_ok=True)
+    made = []
+    for names in desktop_candidates():
+        n, p = resolve_desktop(names)
+        if n:
+            dst = os.path.join(d, n)
+            shutil.copy(p, dst)
+            os.chmod(dst, 0o755)
+            made.append(n)
+    return made
+
+
+def gen_terminal_rc():
+    d = os.path.join(HOME, ".config/xfce4/terminal")
+    os.makedirs(d, exist_ok=True)
+    rc = """[Configuration]
+FontName=%s
+MiscAlwaysShowTabs=FALSE
+MiscMenubarDefault=FALSE
+MiscDefaultGeometry=110x30
+ScrollingBar=TERMINAL_SCROLLBAR_NONE
+BackgroundMode=TERMINAL_BACKGROUND_TRANSPARENT
+BackgroundDarkness=0.92
+ColorForeground=#cccccc
+ColorBackground=#0c0c0c
+ColorCursor=#ffffff
+ColorPalette=#0c0c0c;#c50f1f;#13a10e;#c19c00;#0037da;#881798;#3a96dd;#cccccc;#767676;#e74856;#16c60c;#f9f1a5;#3b78ff;#b4009e;#61d6d6;#f2f2f2
+""" % pick_mono()
+    with open(os.path.join(d, "terminalrc"), "w", encoding="utf-8") as f:
+        f.write(rc)
+
+
+def ensure_user_dirs():
+    for n in ("Desktop", "Documents", "Downloads", "Pictures", "Pictures/Wallpapers", "Music", "Videos", "Workspace"):
+        os.makedirs(os.path.join(HOME, n), exist_ok=True)
+
+
+def cmd_seed(force=False):
+    force = force or os.environ.get("ABIX_RESET_DESKTOP") == "1" or os.path.exists(os.path.join(CFG, "force-reset"))
+    os.makedirs(CFG, exist_ok=True)
+    ensure_user_dirs()
+    if not os.path.exists(SETTINGS):
+        save_settings(load_settings())
+    cur = ""
+    try:
+        with open(MARKER) as f:
+            cur = f.read().strip()
+    except OSError:
+        pass
+    if cur == PROFILE_VERSION and not force:
+        return {"seeded": False, "reason": "already at " + PROFILE_VERSION}
+    backup = backup_old_config()
+    s = load_settings()
+    info = gen_panel(s["THEME"])
+    info["desktop_icons"] = gen_desktop_icons()
+    gen_terminal_rc()
+    with open(MARKER, "w") as f:
+        f.write(PROFILE_VERSION)
+    try:
+        os.remove(os.path.join(CFG, "force-reset"))
+    except OSError:
+        pass
+    info.update({"seeded": True, "backup": backup})
+    return info
+
+
+# ----------------------------------------------------------------- commands
+def cmd_apply():
+    s = load_settings()
+    res = {"theme": apply_theme(s), "wm": None}
+    apply_wm_behaviour()
+    if not apply_wallpaper(s["WALLPAPER"]):
+        apply_wallpaper(DEFAULTS["WALLPAPER"])
+    anim = apply_animation(s["ANIMATION"])
+    res["animation"] = anim
+    st = load_state()
+    st.update({"animation": anim, "theme": res["theme"], "applied_at": int(time.time())})
+    save_state(st)
+    return res
+
+
+def cmd_status():
+    s = load_settings()
+    st = load_state()
+    return {
+        "settings": s,
+        "profile_version": open(MARKER).read().strip() if os.path.exists(MARKER) else None,
+        "active": st,
+        "detected": {
+            "gtk_theme_light": pick_gtk_theme("light"), "gtk_theme_dark": pick_gtk_theme("dark"),
+            "icons": pick_icons(s["THEME"]), "cursor": pick_cursor(), "font": pick_font(),
+            "whisker_menu": has_whisker(), "picom": have("picom"),
+            "wallpapers": sorted(os.path.basename(p) for p in glob.glob(SYS_WALLS + "/*") if p.lower().endswith(IMG_EXT)),
+        },
+    }
+
+
+def main(argv):
+    if len(argv) < 2 or argv[1] in ("-h", "--help", "help"):
+        print(__doc__)
+        return 0
+    cmd, args = argv[1], argv[2:]
+    try:
+        if cmd == "status":
+            print(json.dumps(cmd_status(), indent=2))
+        elif cmd == "seed":
+            print(json.dumps(cmd_seed("--force" in args)))
+        elif cmd == "apply":
+            print(json.dumps(cmd_apply()))
+        elif cmd == "theme" and args and args[0] in THEMES:
+            s = load_settings()
+            s["THEME"] = args[0]
+            # switching mode swaps between the two bundled wallpapers only if the user still uses a default one
+            if os.path.basename(s["WALLPAPER"]) in ("abix-bloom-light.jpg", "abix-bloom-dark.jpg"):
+                s["WALLPAPER"] = SYS_WALLS + "/abix-bloom-%s.jpg" % args[0]
+            save_settings(s)
+            print(json.dumps(cmd_apply()))
+        elif cmd == "anim" and args and args[0] in ANIMS:
+            s = load_settings()
+            s["ANIMATION"] = args[0]
+            save_settings(s)
+            res = apply_animation(args[0])
+            st = load_state()
+            st["animation"] = res
+            save_state(st)
+            print(json.dumps(res))
+        elif cmd == "accent" and args and re.fullmatch(r"#[0-9a-fA-F]{6}", args[0]):
+            s = load_settings()
+            s["ACCENT"] = args[0]
+            save_settings(s)
+            write_gtk_css(s["THEME"], s["ACCENT"])
+            print(json.dumps({"accent": args[0], "note": "new windows pick it up; open apps may need a restart"}))
+        elif cmd == "wallpaper" and args:
+            if not apply_wallpaper(args[0]):
+                print("refused: file must be an image (<=30 MB) inside Pictures, Downloads or the Abix wallpaper folder", file=sys.stderr)
+                return 2
+            s = load_settings()
+            s["WALLPAPER"] = os.path.realpath(args[0])
+            save_settings(s)
+            print(json.dumps({"wallpaper": s["WALLPAPER"]}))
+        elif cmd == "wallpaper-add" and args:
+            src = os.path.realpath(args[0])
+            if not (src.lower().endswith(IMG_EXT) and os.path.isfile(src) and os.path.getsize(src) <= MAX_WALL_BYTES):
+                print("refused: not an image file or bigger than 30 MB", file=sys.stderr)
+                return 2
+            os.makedirs(USER_WALLS, exist_ok=True)
+            name = re.sub(r"[^A-Za-z0-9._-]", "_", os.path.basename(src))
+            dst = os.path.join(USER_WALLS, name)
+            shutil.copy(src, dst)
+            if not apply_wallpaper(dst):
+                return 2
+            s = load_settings()
+            s["WALLPAPER"] = dst
+            save_settings(s)
+            print(json.dumps({"wallpaper": dst}))
+        elif cmd == "get-theme":
+            rc, out = run(["xfconf-query", "-c", "xsettings", "-p", "/Net/ThemeName"])
+            print(out)
+            return 0 if rc == 0 and out else 1
+        elif cmd == "restart-session":
+            run(["xfce4-session-logout", "--logout", "--fast"])
+        else:
+            print("unknown or invalid command. Try: abix-ctl help", file=sys.stderr)
+            return 1
+    except Exception as e:  # never crash the session start because of cosmetics
+        print("abix-ctl error: %s: %s" % (type(e).__name__, e), file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

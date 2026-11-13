@@ -1,0 +1,13 @@
+#!/bin/bash
+# Autostart entry (runs once per desktop session, after Xfce services are up): apply saved Abix settings.
+sleep 2
+/usr/local/bin/abix-ctl apply >> "$HOME/.config/abix/session-init.log" 2>&1
+# Stage 3: an old per-user mimeapps.list may still send .exe to the Archive Manager. Repair it, but only when it points there.
+for m in application/x-ms-dos-executable application/x-msdownload application/vnd.microsoft.portable-executable; do
+  cur="$(xdg-mime query default "$m" 2>/dev/null)"
+  case "$cur" in
+    ""|org.gnome.FileRoller.desktop|file-roller.desktop)
+      [ -f /usr/share/applications/wine.desktop ] && xdg-mime default wine.desktop "$m" ;;
+  esac
+done
+exit 0

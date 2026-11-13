@@ -1,0 +1,15 @@
+#!/bin/bash
+# Starts the X/VNC server (Xtigervnc) with speed options.  Started by supervisord (user abix).
+# Every tuning option is added ONLY if this Xtigervnc build lists it in its own help, so a missing option can
+# never stop the desktop from starting.
+: "${DESKTOP_GEOMETRY:=1280x800}"
+BIN=/usr/bin/Xtigervnc
+HELP="$($BIN -help 2>&1 || true)"
+ARGS=(:1 -rfbport 5901 -localhost -geometry "$DESKTOP_GEOMETRY" -depth 24 -SecurityTypes VncAuth -rfbauth /home/abix/.vnc/passwd -AlwaysShared)
+add() { if grep -q -- "-$1" <<<"$HELP"; then ARGS+=("-$1" "$2"); fi; }
+add FrameRate        "${ABIX_FPS:-60}"       # send up to 60 screen updates per second
+add MaxProcessorUsage 90                     # default 35 % throttles the encoder on a busy desktop = lag
+add DeferUpdate      1                       # send changes after 1 ms instead of waiting to batch them
+add CompareFB        2                       # skip sending pixels that did not change
+add ImprovedHextile  1
+exec "$BIN" "${ARGS[@]}"

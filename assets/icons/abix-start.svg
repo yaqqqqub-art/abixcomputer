@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4cc2ff"/><stop offset="1" stop-color="#7a5cff"/>
+    </linearGradient>
+  </defs>
+  <!-- Abix mark: rounded hexagon-like tile with an "A" built from two strokes. Original artwork. -->
+  <rect x="6" y="6" width="52" height="52" rx="16" fill="url(#g)"/>
+  <path d="M20 46 L32 17 L44 46" fill="none" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M25.5 37 H38.5" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round"/>
+</svg>

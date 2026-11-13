@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=ABIX Browser
+Comment=ABIX's own browser window
+Exec=/usr/local/bin/abix-browser %U
+Icon=abix-browser
+Terminal=false
+Categories=Network;WebBrowser;
+StartupWMClass=abix-browser

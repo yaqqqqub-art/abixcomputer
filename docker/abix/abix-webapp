@@ -1,0 +1,27 @@
+#!/bin/bash
+# Opens a web app (WhatsApp, imo, Telegram) in its own window with its own saved login.
+# Only fixed ids are accepted; the address is chosen here, never taken from the caller.
+case "$1" in
+  whatsapp) URL="https://web.whatsapp.com/" ;;
+  imo)      URL="https://imo.im/" ;;
+  telegram) URL="https://web.telegram.org/" ;;
+  *) echo "unknown web app" >&2; exit 2 ;;
+esac
+PROFILE="${HOME:-/tmp}/.config/abix-webapps/$1"
+mkdir -p "$PROFILE" 2>/dev/null
+for n in google-chrome-stable google-chrome microsoft-edge-stable chromium chromium-browser; do
+  if command -v "$n" >/dev/null 2>&1; then
+    BIN="$(command -v "$n")"
+    if ! pgrep -u "$(id -u)" -f -- "--user-data-dir=$PROFILE" >/dev/null 2>&1; then
+      rm -f "$PROFILE/SingletonLock" "$PROFILE/SingletonCookie" "$PROFILE/SingletonSocket" 2>/dev/null
+    fi
+    exec "$BIN" --user-data-dir="$PROFILE" --app="$URL" --no-sandbox --disable-dev-shm-usage --disable-gpu \
+      --password-store=basic --no-first-run --no-default-browser-check
+  fi
+done
+if command -v firefox >/dev/null 2>&1; then
+  mkdir -p "$PROFILE/firefox"
+  exec firefox --no-remote --profile "$PROFILE/firefox" "$URL"
+fi
+echo "No browser is installed, so $1 cannot open." >&2
+exit 1

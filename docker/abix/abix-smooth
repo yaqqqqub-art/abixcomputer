@@ -1,0 +1,18 @@
+#!/bin/bash
+# abix-smooth  -  one command for "no lag".   Run in the ABIX terminal:   abix-smooth [on|off|status]
+#   on      animations off, window compositor off (fewer screen updates to send), light desktop effects
+#   off     back to the normal look (animations "light")
+#   status  what is active now
+# Speed of the picture itself: top bar > Settings > Speed: Turbo / Smooth / Balanced / Sharp.
+CTL=/usr/local/bin/abix-ctl
+case "${1:-on}" in
+  on)  "$CTL" anim off  >/dev/null 2>&1 && echo "animations: off" || echo "animations: could not change"
+       xfconf-query -c xfwm4 -p /general/use_compositing -n -t bool -s false 2>/dev/null || xfconf-query -c xfwm4 -p /general/use_compositing -s false 2>/dev/null
+       pkill -u "$(id -u)" -x picom 2>/dev/null; echo "compositor: off"
+       xfconf-query -c xfwm4 -p /general/box_move -n -t bool -s false 2>/dev/null
+       echo "Done. For the picture itself use Settings > Speed > Turbo or Smooth." ;;
+  off) "$CTL" anim light >/dev/null 2>&1 && echo "animations: light" ;;
+  status) "$CTL" status 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); print("animation:", d.get("settings",{}).get("ANIMATION"), "| active:", d.get("active",{}).get("animation"))'
+          pgrep -u "$(id -u)" -x picom >/dev/null && echo "compositor: picom running" || echo "compositor: not running" ;;
+  *) echo "usage: abix-smooth [on|off|status]"; exit 2 ;;
+esac

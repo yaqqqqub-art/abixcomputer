@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Restart desktop session
+Comment=Sign out; a fresh desktop session starts automatically
+Exec=/usr/local/bin/abix-ctl restart-session
+Icon=system-log-out
+Terminal=false
+Categories=System;

@@ -1,0 +1,17 @@
+#!/bin/bash
+# Run by apt after every install/upgrade (DPkg::Post-Invoke) and once at build time.
+# Browsers and Electron apps (Chrome, Edge, VS Code) refuse to start in a container without --no-sandbox:
+# their own Start-menu entries do not pass it, so "click Chrome, nothing happens". This points those entries at the
+# ABIX launchers / adds the flag. Safe to run many times.
+D=/usr/share/applications
+fix() { # file  from  to
+  [ -f "$1" ] || return 0
+  grep -q -- "$3" "$1" 2>/dev/null && return 0
+  sed -i "s#^Exec=$2#Exec=$3#" "$1"
+}
+fix $D/google-chrome.desktop   /usr/bin/google-chrome-stable /usr/local/bin/abix-chrome
+fix $D/microsoft-edge.desktop  /usr/bin/microsoft-edge-stable /usr/local/bin/abix-edge
+for f in $D/code.desktop $D/code-url-handler.desktop; do
+  [ -f "$f" ] && ! grep -q -- --no-sandbox "$f" && sed -i 's#^Exec=/usr/share/code/code#Exec=/usr/share/code/code --no-sandbox#' "$f"
+done
+exit 0

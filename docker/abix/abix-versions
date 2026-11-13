@@ -1,0 +1,13 @@
+#!/bin/bash
+# Prints the installed development tools. Run in the ABIX terminal:  abix-versions
+printf '%-8s %s\n' "Java:"   "$(java -version 2>&1 | head -1)"
+printf '%-8s %s\n' "javac:"  "$(javac -version 2>&1)"
+printf '%-8s %s\n' "Python:" "$(python3 --version 2>&1)"
+printf '%-8s %s\n' "pip:"    "$(pip3 --version 2>&1 | awk '{print $1, $2}')"
+printf '%-8s %s\n' "Node:"   "$(node --version 2>&1)"
+printf '%-8s %s\n' "npm:"    "$(npm --version 2>&1)"
+printf '%-8s %s\n' "Ubuntu:" "$(. /etc/os-release && echo "$PRETTY_NAME")"
+echo
+echo "pip install <pkg>        installs for your user (kept in /home/abix)"
+echo "python3 -m venv .venv    makes a virtual environment"
+echo "npm install -g <pkg>     installs to ~/.npm-global (no root needed)"

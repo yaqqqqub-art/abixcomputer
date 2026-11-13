@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Personalization
+Comment=Theme, animations, accent colour and wallpapers
+Exec=/usr/local/bin/abix-personalize
+Icon=preferences-desktop-theme
+Terminal=false
+Categories=Settings;DesktopSettings;GTK;

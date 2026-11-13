@@ -1,0 +1,10 @@
+#!/bin/bash
+# Microsoft Edge inside the container (same reasons as abix-chrome).
+BIN="$(command -v microsoft-edge-stable || true)"
+if [ -z "$BIN" ]; then echo "Microsoft Edge is not installed in this image; opening Firefox." >&2; exec firefox "$@"; fi
+if ! pgrep -u "$(id -u)" -f '/opt/microsoft/msedge/msedge' >/dev/null 2>&1; then
+  rm -f "$HOME/.config/microsoft-edge/SingletonLock" "$HOME/.config/microsoft-edge/SingletonCookie" \
+        "$HOME/.config/microsoft-edge/SingletonSocket" 2>/dev/null
+fi
+exec "$BIN" --no-sandbox --disable-dev-shm-usage --disable-gpu --disable-smooth-scrolling \
+  --password-store=basic --no-first-run --no-default-browser-check "$@"

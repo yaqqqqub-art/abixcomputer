@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>ABIX Cloud Computer</title>
+<link rel="icon" href="logo.svg">
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+
+<!-- Power on / off screens (Stage 3) -->
+<div id="v-boot" class="view center boot" hidden>
+  <div class="alogo big" aria-hidden="true"></div><div class="spinner" aria-hidden="true"></div><p id="boot-text" class="bootmsg">Starting ABIX Computer…</p>
+</div>
+<div id="v-off" class="view center off" hidden>
+  <button id="b-on" class="poweron" aria-label="Turn on"><span>⏻</span></button><p class="bootmsg">ABIX Computer is off. Press the button to turn it on.</p>
+</div>
+
+<!-- Login -->
+<main id="v-login" class="view center" hidden>
+  <form id="login-form" class="card" autocomplete="on">
+    <div class="alogo" aria-hidden="true"></div>
+    <h1>ABIX Cloud Computer</h1>
+    <p class="sub">Your computer. Your cloud. Your control.</p>
+    <label>Username<input id="l-user" name="username" autocomplete="username" required></label>
+    <label>Password<input id="l-pass" name="password" type="password" autocomplete="current-password" required></label>
+    <p id="l-err" class="err" role="alert"></p>
+    <button class="btn primary" type="submit">Sign in</button>
+  </form>
+</main>
+
+<!-- Desktop -->
+<div id="v-desk" class="view desk" hidden>
+  <header id="bar">
+    <span class="brand"><img src="logo.svg" alt="">ABIX <small id="pcname">abix-computer</small></span>
+    <button class="btn start" id="b-start" title="Start menu: all apps and power" aria-haspopup="true"><img src="logo.svg" alt="" class="startlogo"> <span>Start</span></button>
+    <span id="conn" class="pill">connecting…</span>
+    <span class="grow"></span>
+    <div class="menu">
+      <button class="btn" id="b-mouse" title="Mouse mode" aria-haspopup="true">🖱 <span>Mouse</span></button>
+      <div id="mouse-menu" class="dropdown" hidden>
+        <button data-mode="normal">Normal mouse (default)</button>
+        <button data-mode="touchpad">Touchpad mode (like a laptop)</button>
+        <button data-mode="mousepad">Mouse pad (on-screen pad + buttons)</button>
+        <button data-mode="direct">Direct touch (tap where you want)</button>
+        <p id="mouse-help" class="hint pad8"></p>
+      </div>
+    </div>
+    <div class="menu">
+      <button class="btn" id="b-clip" title="Copy / paste" aria-haspopup="true">📋 <span>Copy/Paste</span></button>
+      <div id="clip-menu" class="dropdown clip" hidden>
+        <div class="clip-grid">
+          <button id="c-copy" type="button">Copy</button><button id="c-cut" type="button">Cut</button>
+          <button id="c-paste" type="button">Paste</button><button id="c-all" type="button">Select all</button>
+          <button id="c-tcopy" type="button">Terminal copy</button><button id="c-tpaste" type="button">Terminal paste</button>
+        </div>
+        <textarea id="clip-text" rows="3" placeholder="Fallback box: if the browser blocks the clipboard, paste text here and press Paste." aria-label="Clipboard text"></textarea>
+        <p id="clip-msg" class="hint pad8" role="status"></p>
+      </div>
+    </div>
+    <button class="btn" id="b-kbd" title="On-screen keyboard">⌨ <span>Keyboard</span></button>
+    <button class="btn" id="b-widgets" title="Widgets">▦ <span>Widgets</span></button>
+    <button class="btn" id="b-apps" title="App Center: install apps and Windows setup files">🧩 <span>Apps</span></button>
+    <button class="btn" id="b-files" title="Upload / download files">📁 <span>Files</span></button>
+    <button class="btn" id="b-settings" title="Settings">⚙ <span>Settings</span></button>
+    <button class="btn" id="b-full" title="Full screen">⛶ <span>Full screen</span></button>
+    <button class="btn" id="b-lock" title="Lock">🔒 <span>Lock</span></button>
+    <div class="menu">
+      <button class="btn" id="b-power" title="Power" aria-haspopup="true">⏻ <span>Power</span></button>
+      <div id="power-menu" class="dropdown" hidden>
+        <button data-act="restart-session">Restart desktop session</button>
+        <button data-act="restart-desktop">Restart whole desktop</button>
+        <button data-act="sleep">Sleep (lock screen)</button>
+        <button data-act="logout">Sign out of Abix</button>
+        <button data-act="shutdown">Shut down</button>
+      </div>
+    </div>
+    <button class="btn" id="b-hide" title="Hide this bar">▲</button>
+  </header>
+  <button id="b-show" class="btn" title="Show bar" hidden>▼</button>
+  <div id="stage">
+    <iframe id="screen" title="Desktop" allow="clipboard-read; clipboard-write; fullscreen"></iframe>
+    <div id="pad-layer" hidden></div>
+    <img id="vcursor" src="cursor.svg" alt="" hidden>
+    <section id="mpad" hidden aria-label="Mouse pad">
+      <div id="mpad-pad" class="mpad-pad" aria-label="Touch area: drag to move the pointer"><span class="hint">Mouse pad</span></div>
+      <div id="mpad-scroll" class="mpad-scroll" aria-label="Scroll strip"><span class="hint">⇵</span></div>
+      <div class="mpad-btns"><button class="btn" id="mpad-l" type="button">Left click</button><button class="btn" id="mpad-r" type="button">Right click</button></div>
+    </section>
+  </div>
+
+  <section id="osk" hidden aria-label="On-screen keyboard">
+    <div class="osk-head" id="osk-head-keys"><strong>Keyboard</strong><span id="osk-name" class="hint">Press a key to see its name</span><span class="grow"></span>
+      <button class="btn" id="osk-copy" type="button" title="Copy (Ctrl+C) and send to your device">Copy</button><button class="btn" id="osk-paste" type="button" title="Paste from your device (Ctrl+V)">Paste</button>
+      <button class="btn" id="osk-rgb" type="button" aria-pressed="true">RGB</button><button class="btn" id="osk-snd" type="button" aria-pressed="true">Sound</button><button class="btn" id="osk-close" type="button" aria-label="Close keyboard">✕</button></div>
+    <div id="osk-keys" class="osk-keys"></div>
+  </section>
+  <aside id="widgets" hidden aria-label="Widgets">
+    <div class="s-head"><h2>Widgets</h2><button class="btn" id="w-close" aria-label="Close">✕</button></div>
+    <div class="wcard"><div id="w-time" class="w-time"></div><div id="w-date" class="hint"></div></div>
+    <div class="wcard"><h3>Computer</h3><p id="w-info" class="hint">…</p></div>
+    <div class="wcard"><h3>Quick notes</h3><textarea id="w-notes" rows="6" placeholder="Type a note… (saved in this browser)" aria-label="Quick notes"></textarea></div>
+    <div class="wcard"><h3>Web apps</h3>
+      <p class="hint">Windows-only apps (imo desktop, WhatsApp desktop) do not run on Linux. Use their web versions inside Chrome in the cloud PC:</p>
+      <p class="hint">web.whatsapp.com · imo.im · youtube.com</p></div>
+  </aside>
+  <aside id="files" hidden aria-label="Files">
+    <div class="s-head"><h2>Files</h2><button class="btn" id="f-close" aria-label="Close">✕</button></div>
+    <div class="row left"><button class="btn" id="f-up-dir" title="Up one folder">↑</button><button class="btn" id="f-home">Home</button><button class="btn" id="f-dl">Downloads</button><button class="btn" id="f-new">New folder</button></div>
+    <p id="f-path" class="hint">/</p>
+    <ul id="f-list" class="flist"></ul>
+    <div class="row left"><label class="btn primary upl">Upload files<input id="f-pick" type="file" multiple hidden></label></div>
+    <progress id="f-prog" value="0" max="100" hidden></progress>
+    <p id="f-msg" class="hint" role="status"></p>
+  </aside>
+
+  <aside id="apps" hidden aria-label="App Center">
+    <div class="s-head"><h2>App Center</h2><button class="btn" id="a-close" aria-label="Close">✕</button></div>
+    <section><h3>Windows program (setup .exe / .msi)</h3>
+      <p class="hint">Paste the https download link of a Windows setup file. It is downloaded into Downloads and started in Wine. You can also upload a setup file with Files and double-click it.</p>
+      <input id="a-url" type="url" inputmode="url" placeholder="https://example.com/setup.exe" aria-label="Link to a setup .exe or .msi" autocomplete="off">
+      <div class="row left"><button class="btn primary" id="a-go" type="button">Download and run</button></div>
+      <p class="hint" id="a-wine"></p></section>
+    <section id="a-jobbox" hidden><h3 id="a-jobtitle">Working…</h3>
+      <progress id="a-prog" value="0" max="100"></progress>
+      <p id="a-msg" class="hint" role="status"></p>
+      <details><summary class="hint">Details</summary><pre id="a-log" class="logbox"></pre></details></section>
+    <section><h3>Apps</h3>
+      <input id="a-search" type="search" placeholder="Search apps" aria-label="Search apps" autocomplete="off">
+      <div id="a-list" class="alist"></div></section>
+  </aside>
+
+  <aside id="start" hidden aria-label="Start menu">
+    <input id="st-search" type="search" placeholder="Search apps" aria-label="Search apps" autocomplete="off">
+    <div id="st-groups" class="st-groups"></div>
+    <p id="st-msg" class="hint" role="status"></p>
+    <footer class="st-foot">
+      <span class="st-user"><span class="alogo mini" aria-hidden="true"></span><span>ABIX Computer</span></span>
+      <span class="grow"></span>
+      <button class="btn" data-pact="sleep" title="Sleep: lock the screen">🌙 <span>Sleep</span></button>
+      <button class="btn" data-pact="restart-session" title="Restart the desktop session">↻ <span>Restart session</span></button>
+      <button class="btn" data-pact="restart-desktop" title="Restart the whole desktop">⟳ <span>Restart desktop</span></button>
+      <button class="btn" data-pact="shutdown" title="Shut down">⏻ <span>Shut down</span></button>
+      <button class="btn" data-pact="logout" title="Sign out">⇥ <span>Sign out</span></button>
+    </footer>
+  </aside>
+
+  <aside id="settings" hidden aria-label="Settings">
+    <div class="s-head"><h2>Settings</h2><button class="btn" id="s-close" aria-label="Close">✕</button></div>
+    <section><h3>Brightness</h3>
+      <input id="s-bright" type="range" min="30" max="100" value="100" aria-label="Brightness">
+      <label class="chk"><input id="s-night" type="checkbox"> Night light (warmer colours)</label>
+      <p class="hint">Applies to the screen in this browser. Cloud PCs have no real backlight.</p></section>
+    <section><h3>Mode</h3>
+      <div class="seg" data-key="theme"><button data-v="light">Light</button><button data-v="dark">Dark</button></div></section>
+    <section><h3>Animations</h3>
+      <div class="seg" data-key="animation"><button data-v="off">Off</button><button data-v="light">Light</button><button data-v="full">Full</button></div>
+      <p class="hint" id="s-anim">…</p></section>
+    <section><h3>ABIX logo animation</h3>
+      <div class="seg" data-ui="logo_anim"><button data-v="off">Off</button><button data-v="light">Light</button><button data-v="full">Full</button></div>
+      <div class="seg wrap" data-ui="logo_style"><button data-v="pulse">Pulse</button><button data-v="orbit">Orbit</button><button data-v="draw">Draw</button><button data-v="bloom">Bloom</button><button data-v="aurora">Aurora</button></div>
+      <label class="chk"><input id="s-bootanim" type="checkbox"> Show the logo when starting, restarting and signing out</label>
+      <div class="logo-prev"><div class="alogo big" id="s-logo-prev" aria-hidden="true"></div></div>
+      <div class="row left"><button class="btn" id="s-preview" type="button">Replay preview</button></div>
+      <p class="hint" id="s-logohint"></p></section>
+    <section><h3>Speed (smoothness)</h3>
+      <div class="seg" id="perf-seg"><button data-p="turbo">Turbo</button><button data-p="smooth">Smooth</button><button data-p="balanced">Balanced</button><button data-p="sharp">Sharp</button></div>
+      <p class="hint">Smooth (default) = fast and clear enough. Turbo = fastest, softer picture, for slow internet. Sharp = clearest picture. Changing it reconnects the screen; your apps keep running.</p></section>
+    <section><h3>Mouse &amp; sound</h3>
+      <label class="hint">Pointer speed (touchpad modes)<input id="s-speed" type="range" min="50" max="250" value="100" aria-label="Pointer speed"></label>
+      <label class="chk"><input id="s-natural" type="checkbox"> Natural scrolling (content follows fingers)</label>
+      <label class="chk"><input id="s-sound" type="checkbox"> Click sounds (buttons and touchpad taps)</label></section>
+    <section><h3>Accent colour</h3>
+      <div id="accents" class="swatches"></div></section>
+    <section><h3>Wallpaper</h3><div id="walls" class="walls"></div></section>
+    <p class="hint" id="s-start"></p>
+    <p id="s-msg" class="hint" role="status"></p>
+  </aside>
+
+  <div id="confirm" class="overlay" hidden>
+    <div class="card"><h2 id="c-title"></h2><p id="c-text" class="sub"></p>
+      <div class="row"><button class="btn" id="c-no">Cancel</button><button class="btn primary" id="c-yes">Continue</button></div></div>
+  </div>
+</div>
+
+<!-- Lock screen -->
+<div id="v-lock" class="view center lock" hidden>
+  <form id="lock-form" class="card">
+    <div id="clock" class="clock"></div>
+    <div class="alogo small" aria-hidden="true"></div>
+    <h2 id="lock-user">Locked</h2>
+    <p class="sub">Your desktop keeps running. Enter your password to continue.</p>
+    <input id="k-pass" type="password" autocomplete="current-password" placeholder="Password" required>
+    <p id="k-err" class="err" role="alert"></p>
+    <div class="row"><button class="btn" type="button" id="k-out">Sign out</button><button class="btn primary" type="submit">Unlock</button></div>
+  </form>
+</div>
+
+<div id="night" aria-hidden="true"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+<script src="app.js"></script>
+<script src="osk.js"></script>
+<script src="pointer.js"></script>
+<script src="extras.js"></script>
+<script src="apps.js"></script>
+<script src="start.js"></script>
+</body>
+</html>

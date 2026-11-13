@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Microsoft Edge
+Comment=Browse the web
+Exec=/usr/local/bin/abix-edge %U
+Icon=microsoft-edge
+Terminal=false
+Categories=Network;WebBrowser;
+MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;
+StartupWMClass=Microsoft-edge

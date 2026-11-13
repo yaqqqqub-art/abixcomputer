@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Abix session init
+Exec=/usr/local/bin/abix-session-init
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

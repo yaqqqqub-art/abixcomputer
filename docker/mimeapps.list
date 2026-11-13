@@ -1,0 +1,7 @@
+# Windows programs open with Wine (not with the Archive Manager, which only prints "Command exited abnormally" for an .exe).
+[Default Applications]
+application/x-ms-dos-executable=wine.desktop
+application/x-msdownload=wine.desktop
+application/vnd.microsoft.portable-executable=wine.desktop
+application/x-java-archive=abix-java-jar.desktop
+application/java-archive=abix-java-jar.desktop

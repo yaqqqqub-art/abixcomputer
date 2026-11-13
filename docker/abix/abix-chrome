@@ -1,0 +1,45 @@
+#!/bin/bash
+# Google Chrome inside the ABIX container (Stage 5).
+# Why these flags:
+#   --no-sandbox            the container drops all capabilities, so Chrome's own sandbox cannot start;
+#                           the container itself is the isolation boundary.
+#   --disable-dev-shm-usage use /tmp instead of /dev/shm (a small /dev/shm makes tabs crash).
+#   --disable-gpu           there is no GPU behind VNC; a crashing GPU process is the #1 reason for a blank window.
+#   --disable-smooth-scrolling  looks laggy through VNC (every animation frame is sent over the network).
+#   --password-store=basic  no keyring daemon in the container.
+# If Chrome is not installed (failed download at build time, or an arm64 server) this script says so and opens
+# Firefox instead, so a click on "Google Chrome" never does nothing.
+BIN="$(command -v google-chrome-stable || command -v google-chrome || true)"
+LOG="${HOME:-/tmp}/.cache/abix-chrome.log"; mkdir -p "$(dirname "$LOG")" 2>/dev/null
+
+notice() {   # small GTK message, falls back to stderr
+  python3 - "$1" <<'PY' 2>/dev/null || echo "$1" >&2
+import sys, gi
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk
+d = Gtk.MessageDialog(message_type=Gtk.MessageType.INFO, buttons=Gtk.ButtonsType.OK, text="Google Chrome")
+d.format_secondary_text(sys.argv[1]); d.run()
+PY
+}
+
+if [ -z "$BIN" ]; then
+  arch="$(dpkg --print-architecture 2>/dev/null)"
+  if [ "$arch" != "amd64" ]; then
+    notice "Google does not publish Chrome for $arch. Opening Firefox instead."
+  else
+    notice "Google Chrome is not installed in this image. Open ABIX Apps > Google Chrome > Install, or rebuild the image. Opening Firefox for now."
+  fi
+  exec firefox "$@"
+fi
+
+# A crashed or restarted container leaves a stale profile lock behind; Chrome then says "profile in use"
+# and exits. Remove the lock only when no Chrome of this user is running.
+if ! pgrep -u "$(id -u)" -f '/opt/google/chrome/chrome' >/dev/null 2>&1; then
+  rm -f "$HOME/.config/google-chrome/SingletonLock" "$HOME/.config/google-chrome/SingletonCookie" \
+        "$HOME/.config/google-chrome/SingletonSocket" 2>/dev/null
+fi
+
+exec "$BIN" --no-sandbox --disable-dev-shm-usage --disable-gpu --disable-smooth-scrolling \
+  --password-store=basic --no-first-run --no-default-browser-check \
+  --disable-features=TranslateUI,MediaRouter,OptimizationHints --disable-background-networking \
+  "$@" >>"$LOG" 2>&1

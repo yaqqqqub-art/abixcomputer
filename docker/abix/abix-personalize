@@ -1,0 +1,188 @@
+#!/usr/bin/env python3
+"""Abix Personalization - small GTK3 window: light/dark, animation level, accent colour, wallpapers.
+Talks only to /usr/local/bin/abix-ctl (the same tool the web Settings app will use in Stage 2)."""
+import json
+import os
+import subprocess
+import sys
+
+import gi
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk, GdkPixbuf, Gdk  # noqa: E402
+
+CTL = "/usr/local/bin/abix-ctl"
+SYS_WALLS = "/usr/share/backgrounds/abix"
+USER_WALLS = os.path.expanduser("~/Pictures/Wallpapers")
+
+
+def ctl(*args):
+    """Run abix-ctl, return (ok, stdout)."""
+    try:
+        r = subprocess.run([CTL, *args], capture_output=True, text=True, timeout=40)
+        return r.returncode == 0, r.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return False, str(e)
+
+
+def current():
+    ok, out = ctl("status")
+    try:
+        return json.loads(out) if ok else {}
+    except ValueError:
+        return {}
+
+
+class Win(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="Abix Personalization")
+        self.set_default_size(760, 640)
+        self.set_border_width(16)
+        st = current()
+        sett = st.get("settings", {})
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        self.add(root)
+
+        # --- colour mode
+        root.pack_start(self.heading("Colour mode"), False, False, 0)
+        row = Gtk.Box(spacing=12)
+        self.r_light = Gtk.RadioButton.new_with_label_from_widget(None, "Light")
+        self.r_dark = Gtk.RadioButton.new_with_label_from_widget(self.r_light, "Dark")
+        (self.r_dark if sett.get("THEME") == "dark" else self.r_light).set_active(True)
+        self.r_light.connect("toggled", self.on_theme, "light")
+        self.r_dark.connect("toggled", self.on_theme, "dark")
+        row.pack_start(self.r_light, False, False, 0)
+        row.pack_start(self.r_dark, False, False, 0)
+        root.pack_start(row, False, False, 0)
+
+        # --- animation level
+        root.pack_start(self.heading("Animations"), False, False, 0)
+        row = Gtk.Box(spacing=12)
+        first = None
+        self.anim_btns = {}
+        for lv, label in (("off", "Off"), ("light", "Light (fade)"), ("full", "Full (fade + shadows)")):
+            b = Gtk.RadioButton.new_with_label_from_widget(first, label)
+            first = first or b
+            self.anim_btns[lv] = b
+            row.pack_start(b, False, False, 0)
+        self.anim_btns.get(sett.get("ANIMATION", "light"), self.anim_btns["light"]).set_active(True)
+        for lv, b in self.anim_btns.items():
+            b.connect("toggled", self.on_anim, lv)
+        root.pack_start(row, False, False, 0)
+        self.anim_info = Gtk.Label(xalign=0)
+        self.anim_info.set_line_wrap(True)
+        self.show_anim_state(st.get("active", {}).get("animation"))
+        root.pack_start(self.anim_info, False, False, 0)
+
+        # --- accent
+        root.pack_start(self.heading("Accent colour"), False, False, 0)
+        self.accent = Gtk.ColorButton()
+        rgba = Gdk.RGBA()
+        rgba.parse(sett.get("ACCENT", "#0067c0"))
+        self.accent.set_rgba(rgba)
+        self.accent.connect("color-set", self.on_accent)
+        root.pack_start(self.accent, False, False, 0)
+
+        # --- wallpapers
+        head = Gtk.Box(spacing=8)
+        head.pack_start(self.heading("Wallpaper"), True, True, 0)
+        add = Gtk.Button(label="Add picture...")
+        add.connect("clicked", self.on_add)
+        head.pack_end(add, False, False, 0)
+        root.pack_start(head, False, False, 0)
+        sw = Gtk.ScrolledWindow()
+        sw.set_vexpand(True)
+        self.flow = Gtk.FlowBox()
+        self.flow.set_max_children_per_line(4)
+        self.flow.set_selection_mode(Gtk.SelectionMode.NONE)
+        self.flow.set_homogeneous(True)
+        sw.add(self.flow)
+        root.pack_start(sw, True, True, 0)
+        self.status = Gtk.Label(xalign=0)
+        root.pack_start(self.status, False, False, 0)
+        self.fill_walls()
+
+    def heading(self, text):
+        l = Gtk.Label(xalign=0)
+        l.set_markup("<b>%s</b>" % text)
+        return l
+
+    def show_anim_state(self, a):
+        if a:
+            txt = "Active now: %s" % a.get("effective", "?")
+            if a.get("reason"):
+                txt += "  (%s)" % a["reason"]
+            self.anim_info.set_text(txt)
+        else:
+            self.anim_info.set_text("")
+
+    def fill_walls(self):
+        for c in self.flow.get_children():
+            self.flow.remove(c)
+        files = []
+        for d in (SYS_WALLS, USER_WALLS):
+            if os.path.isdir(d):
+                files += [os.path.join(d, f) for f in sorted(os.listdir(d))
+                          if f.lower().endswith((".jpg", ".jpeg", ".png", ".webp"))]
+        for path in files:
+            try:
+                pb = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, 170, 96, True)
+            except Exception:
+                continue
+            btn = Gtk.Button()
+            box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+            box.pack_start(Gtk.Image.new_from_pixbuf(pb), False, False, 0)
+            box.pack_start(Gtk.Label(label=os.path.splitext(os.path.basename(path))[0].replace("abix-", "")), False, False, 0)
+            btn.add(box)
+            btn.connect("clicked", self.on_wall, path)
+            self.flow.add(btn)
+        self.flow.show_all()
+
+    # ---- handlers
+    def on_theme(self, btn, mode):
+        if btn.get_active():
+            ok, _ = ctl("theme", mode)
+            self.status.set_text("Mode: %s %s" % (mode, "applied" if ok else "FAILED (see terminal)"))
+
+    def on_anim(self, btn, lv):
+        if btn.get_active():
+            ok, out = ctl("anim", lv)
+            try:
+                self.show_anim_state(json.loads(out))
+            except ValueError:
+                self.anim_info.set_text("could not read result")
+
+    def on_accent(self, btn):
+        c = btn.get_rgba()
+        hexv = "#%02x%02x%02x" % (int(c.red * 255), int(c.green * 255), int(c.blue * 255))
+        ok, _ = ctl("accent", hexv)
+        self.status.set_text("Accent %s %s (new windows pick it up)" % (hexv, "saved" if ok else "FAILED"))
+
+    def on_wall(self, _btn, path):
+        ok, _ = ctl("wallpaper", path)
+        self.status.set_text("Wallpaper %s" % ("changed" if ok else "FAILED"))
+
+    def on_add(self, _btn):
+        dlg = Gtk.FileChooserDialog(title="Choose a picture", parent=self, action=Gtk.FileChooserAction.OPEN)
+        dlg.add_buttons("Cancel", Gtk.ResponseType.CANCEL, "Use picture", Gtk.ResponseType.OK)
+        flt = Gtk.FileFilter()
+        flt.set_name("Pictures")
+        for pat in ("*.jpg", "*.jpeg", "*.png", "*.webp"):
+            flt.add_pattern(pat)
+        dlg.add_filter(flt)
+        if dlg.run() == Gtk.ResponseType.OK:
+            ok, _ = ctl("wallpaper-add", dlg.get_filename())
+            self.status.set_text("Picture %s" % ("added" if ok else "refused (images up to 30 MB only)"))
+            self.fill_walls()
+        dlg.destroy()
+
+
+def main():
+    w = Win()
+    w.connect("destroy", Gtk.main_quit)
+    w.show_all()
+    Gtk.main()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

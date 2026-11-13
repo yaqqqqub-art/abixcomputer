@@ -1,0 +1,28 @@
+#!/bin/bash
+# ABIX Browser: an ABIX-branded REAL browser (no fake UI). Tabs, bookmarks, history and downloads come from the engine.
+# It uses its own profile in ~/.config/abix-browser (persistent, separate from Chrome/Firefox) and opens the ABIX home page.
+# Engine order: Chrome/Edge/Chromium, then Firefox. If none exists it says so and exits with an error (never fakes success).
+HOME_PAGE="file:///usr/share/abix/browser-home.html"
+PROFILE="${HOME:-/tmp}/.config/abix-browser"
+mkdir -p "$PROFILE" 2>/dev/null
+BIN=""
+for n in google-chrome-stable google-chrome microsoft-edge-stable chromium chromium-browser; do
+  if command -v "$n" >/dev/null 2>&1; then BIN="$(command -v "$n")"; break; fi
+done
+if [ -n "$BIN" ]; then
+  DIR="$PROFILE/chromium"; mkdir -p "$DIR"
+  # a crashed container leaves a stale profile lock; remove it only when no browser uses this profile
+  if ! pgrep -u "$(id -u)" -f -- "--user-data-dir=$DIR" >/dev/null 2>&1; then
+    rm -f "$DIR/SingletonLock" "$DIR/SingletonCookie" "$DIR/SingletonSocket" 2>/dev/null
+  fi
+  [ "$#" -eq 0 ] && set -- "$HOME_PAGE"
+  exec "$BIN" --user-data-dir="$DIR" --no-sandbox --disable-dev-shm-usage --disable-gpu --disable-smooth-scrolling \
+    --password-store=basic --no-first-run --no-default-browser-check --disable-background-networking "$@"
+fi
+if command -v firefox >/dev/null 2>&1; then
+  DIR="$PROFILE/firefox"; mkdir -p "$DIR"
+  [ "$#" -eq 0 ] && set -- "$HOME_PAGE"
+  exec firefox --no-remote --profile "$DIR" "$@"
+fi
+echo "ABIX Browser needs Chrome, Edge, Chromium or Firefox, and none is installed." >&2
+exit 1
