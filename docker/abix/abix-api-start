@@ -1,0 +1,63 @@
+#!/bin/bash
+# Ensure the API config exists even when the host starts Supervisor directly.
+set -euo pipefail
+
+CONF="${ABIX_BACKEND_CONF:-/etc/abix/backend.json}"
+mkdir -p "$(dirname "$CONF")" /home/abix
+
+if [ ! -s "$CONF" ]; then
+  echo "[abix] Backend config missing; creating it from Blitz environment"
+  : "${VNC_PASSWORD:?VNC_PASSWORD is missing from the app environment}"
+  : "${ABIX_ADMIN_USER:=abixone}"
+
+  if [ -n "${ABIX_INIT_PASSWORD:-}" ]; then
+    ABIX_ADMIN_HASH="$(ABIX_PW="$ABIX_INIT_PASSWORD" python3 - <<'PY'
+import hashlib, os, secrets
+password = os.environ["ABIX_PW"]
+salt = secrets.token_hex(16)
+digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 200000).hex()
+print("pbkdf2:200000:%s:%s" % (salt, digest))
+PY
+)"
+  fi
+
+  : "${ABIX_ADMIN_HASH:?Set ABIX_INIT_PASSWORD (10+ characters) or a valid ABIX_ADMIN_HASH}"
+  ABIX_ADMIN_HASH="$ABIX_ADMIN_HASH" python3 - <<'PY'
+import os, re, sys
+value = os.environ["ABIX_ADMIN_HASH"]
+if not re.fullmatch(r"pbkdf2:[1-9][0-9]*:[0-9a-f]{32}:[0-9a-f]{64}", value):
+    sys.exit("ABIX_ADMIN_HASH is invalid; set ABIX_INIT_PASSWORD in Blitz Environment")
+PY
+
+  if [ -z "${ABIX_SECRET:-}" ]; then
+    SECRET_FILE=/home/abix/.abix-secret
+    if [ -s "$SECRET_FILE" ]; then
+      ABIX_SECRET="$(cat "$SECRET_FILE")"
+    else
+      ABIX_SECRET="$(openssl rand -hex 32)"
+      ( umask 077; printf '%s' "$ABIX_SECRET" > "$SECRET_FILE" )
+    fi
+  fi
+  : "${ABIX_SECRET:?ABIX_SECRET is missing}"
+  [ "${#ABIX_SECRET}" -ge 32 ] || { echo "ABIX_SECRET must be at least 32 characters" >&2; exit 1; }
+
+  export ABIX_ADMIN_HASH ABIX_ADMIN_USER ABIX_SECRET VNC_PASSWORD
+  CONF_PATH="$CONF" python3 - <<'PY'
+import json, os
+path = os.environ["CONF_PATH"]
+data = {
+    "user": os.environ["ABIX_ADMIN_USER"],
+    "hash": os.environ["ABIX_ADMIN_HASH"],
+    "secret": os.environ["ABIX_SECRET"],
+    "vnc_password": os.environ["VNC_PASSWORD"],
+}
+fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+with os.fdopen(fd, "w", encoding="utf-8") as f:
+    json.dump(data, f)
+PY
+  chmod 600 "$CONF"
+  echo "[abix] Backend config created at $CONF"
+fi
+
+export ABIX_BACKEND_CONF="$CONF"
+exec /usr/bin/python3 /usr/local/lib/abix/abix_api.py
