@@ -6,7 +6,7 @@ cannot read the secrets), listens on 0.0.0.0:8080 on the internal Docker network
 reached only through Nginx (/api/). Desktop changes are made by running `abix-ctl` as the desktop
 user - always as an argument list, never through a shell.
 
-Config file (root-only, written by entrypoint.sh):  /etc/abix/backend.json
+Config file (written by entrypoint.sh):  /home/abix/.config/abix/backend.json
   {"user": "admin", "hash": "pbkdf2:<iterations>:<salt hex>:<hash hex>", "secret": "<hex>", "vnc_password": "..."}
 """
 import base64
@@ -29,7 +29,7 @@ import abix_prefs
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-CONF_PATH = os.environ.get("ABIX_BACKEND_CONF", "/etc/abix/backend.json")
+CONF_PATH = os.environ.get("ABIX_BACKEND_CONF", "/home/abix/.config/abix/backend.json")
 CTL = os.environ.get("ABIX_CTL", "/usr/local/bin/abix-ctl")
 DESK_USER = os.environ.get("ABIX_DESKTOP_USER", "abix")          # "" = do not drop privileges (tests)
 DESK_HOME = os.environ.get("ABIX_DESKTOP_HOME", "/home/abix")
