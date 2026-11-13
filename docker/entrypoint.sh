@@ -30,7 +30,7 @@ if [ -z "${ABIX_SECRET:-}" ]; then
   fi
 fi
 : "${ABIX_SECRET:?could not create ABIX_SECRET}"
-: "${ABIX_ADMIN_USER:=admin}"
+: "${ABIX_ADMIN_USER:=abixone}"
 
 mkdir -p /home/abix/.config/abix /home/abix/.runtime /home/abix/.vnc /home/abix/Workspace
 mkdir -p /home/abix/Desktop /home/abix/Downloads /home/abix/Documents /home/abix/Pictures
