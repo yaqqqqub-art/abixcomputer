@@ -3,7 +3,21 @@ set -euo pipefail
 
 : "${VNC_PASSWORD:?VNC_PASSWORD is not set}"
 : "${DESKTOP_GEOMETRY:=1280x800}"
-: "${ABIX_ADMIN_HASH:?ABIX_ADMIN_HASH is not set - run deployment/init.sh}"
+# Web login password: allow a one-time/reset password to be supplied as a Blitz secret.
+# Only the PBKDF2 hash is written to the root-only backend config; clear text is removed immediately.
+if [ -n "${ABIX_INIT_PASSWORD:-}" ]; then
+  [ "${#ABIX_INIT_PASSWORD}" -ge 10 ] || { echo "ABIX_INIT_PASSWORD must be at least 10 characters" >&2; exit 1; }
+  ABIX_ADMIN_HASH="$(ABIX_PW="$ABIX_INIT_PASSWORD" python3 - <<'PY'
+import hashlib, os, secrets
+password = os.environ["ABIX_PW"]
+salt = secrets.token_hex(16)
+digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 200000).hex()
+print("pbkdf2:200000:%s:%s" % (salt, digest))
+PY
+)"
+  unset ABIX_INIT_PASSWORD ABIX_PW
+fi
+: "${ABIX_ADMIN_HASH:?ABIX_ADMIN_HASH is not set - set ABIX_INIT_PASSWORD in the app environment or run deployment/init.sh}"
 # Generate the internal session secret on first boot and keep it in the persistent home volume.
 # This lets managed hosts such as blitz.cloud start without a manually supplied ABIX_SECRET.
 if [ -z "${ABIX_SECRET:-}" ]; then
