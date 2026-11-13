@@ -130,7 +130,8 @@ RUN rm -f /etc/nginx/sites-enabled/default \
  && chmod 700 /etc/abix
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 COPY docker/vncpw.py /usr/local/bin/vncpw.py
-RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/vncpw.py
+COPY docker/abix/abix-api-start /usr/local/bin/abix-api-start
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/vncpw.py /usr/local/bin/abix-api-start
 
 EXPOSE 6080
 USER 1000:1000
