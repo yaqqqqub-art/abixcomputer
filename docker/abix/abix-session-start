@@ -1,7 +1,10 @@
 #!/bin/bash
 # Started by supervisord (as user abix) instead of the old inline command.
 # 1) same prerequisites as before  2) seed Abix desktop config (first run / reset only)  3) start Xfce.
-mkdir -p "${XDG_RUNTIME_DIR:-/home/abix/.runtime}" && chmod 700 "${XDG_RUNTIME_DIR:-/home/abix/.runtime}"
+RUNTIME_DIR=/home/abix/.runtime
+mkdir -p "$RUNTIME_DIR"
+chmod 700 "$RUNTIME_DIR"
+export XDG_RUNTIME_DIR="$RUNTIME_DIR"
 sleep 3
 # Seeding must never block the desktop: if it fails we still get a normal Xfce.
 /usr/local/bin/abix-ctl seed || echo "[abix] seed failed - starting stock Xfce"
