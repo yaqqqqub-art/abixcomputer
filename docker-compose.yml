@@ -1,0 +1,80 @@
+services:
+  desktop:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.desktop
+      args:
+        ABIX_FLUENT: ${ABIX_FLUENT:-1}   # 0 = skip the optional Fluent GTK theme download at build time
+        ABIX_WINE: ${ABIX_WINE:-1}       # 0 = skip Wine (saves ~1 GB; .exe files then cannot run)
+        NODE_MAJOR: ${NODE_MAJOR:-24}    # Node.js major version from NodeSource (LTS)
+        ABIX_EXTRA_APT: ${ABIX_EXTRA_APT:-}   # extra Ubuntu packages baked into the image, e.g. "vlc gimp" (survive rebuilds)
+    image: abix/cloud-desktop:v5
+    container_name: abix-desktop
+    hostname: abix-computer
+    restart: unless-stopped
+    environment:
+      VNC_PASSWORD: ${VNC_PASSWORD:?run deployment/init.sh first}
+      ABIX_ADMIN_USER: ${ABIX_ADMIN_USER:-admin}
+      ABIX_ADMIN_HASH: ${ABIX_ADMIN_HASH:?run deployment/init.sh first}
+      ABIX_SECRET: ${ABIX_SECRET:?run deployment/init.sh first}
+      ABIX_SESSION_HOURS: ${ABIX_SESSION_HOURS:-8}
+      ABIX_FPS: ${ABIX_FPS:-60}                    # screen updates per second (lower = less CPU on a weak server)
+      ABIX_APPS_RESTORE: ${ABIX_APPS_RESTORE:-1}   # 1 = apps installed from the App Center come back after the container is re-created
+      ABIX_MAX_DOWNLOAD_MB: ${ABIX_MAX_DOWNLOAD_MB:-2048}
+      DESKTOP_GEOMETRY: ${DESKTOP_GEOMETRY:-1280x800}
+      ABIX_DEFAULT_THEME: ${ABIX_DEFAULT_THEME:-light}          # light | dark (first start only)
+      ABIX_DEFAULT_ANIMATION: ${ABIX_DEFAULT_ANIMATION:-light}  # off | light | full (first start only)
+      ABIX_RESET_DESKTOP: ${ABIX_RESET_DESKTOP:-0}              # 1 = rebuild panel/menu/icons at next start (old config is backed up)
+    volumes:
+      - abix-home:/home/abix          # persistent workspace
+    # No "ports:" on purpose. VNC and noVNC are never published to the host.
+    expose:
+      - "6080"
+      - "8080"
+    networks: [abix-internal]
+    shm_size: "512m"
+    mem_limit: ${DESKTOP_MEM_LIMIT:-4g}
+    cpus: ${DESKTOP_CPUS:-3.0}
+    pids_limit: 1024
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, DAC_OVERRIDE, FOWNER, KILL]
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: abix-nginx
+    restart: unless-stopped
+    depends_on: [desktop]
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    # Long syntax with create_host_path: false -> if a file is missing, compose stops with a clear error
+    # instead of silently creating an empty DIRECTORY (that bug broke nginx before). Run deployment/init.sh first.
+    volumes:
+      - type: bind
+        source: ./deployment/nginx.conf
+        target: /etc/nginx/conf.d/default.conf
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ./deployment/certs
+        target: /etc/nginx/certs
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ./frontend
+        target: /usr/share/nginx/abix
+        read_only: true
+        bind: {create_host_path: false}
+    networks: [abix-internal]
+    read_only: true
+    tmpfs: [/var/cache/nginx, /var/run, /tmp]
+    security_opt:
+      - no-new-privileges:true
+
+networks:
+  abix-internal:
+
+volumes:
+  abix-home:

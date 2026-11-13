@@ -1,0 +1,4 @@
+.env
+deployment/certs/
+deployment/htpasswd
+deployment/first-login.txt

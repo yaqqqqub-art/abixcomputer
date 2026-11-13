@@ -1,0 +1,34 @@
+# Stage 4: share your ABIX Computer on the internet with a link (login password still required).
+# Uses a Cloudflare Tunnel: no router settings, no port forwarding, real HTTPS on the shared link.
+#
+#   Quick link (no account, random address, changes each time):
+#     docker compose -f docker-compose.yml -f docker-compose.public.yml up -d --build
+#     docker compose -f docker-compose.yml -f docker-compose.public.yml logs tunnel | grep trycloudflare
+#
+#   Fixed address (free Cloudflare account + your own domain): create a tunnel in the Cloudflare dashboard,
+#   set its public hostname service to  https://nginx:443  with "No TLS Verify" ON, put the token in .env as
+#   CLOUDFLARE_TUNNEL_TOKEN=...   and start with the same command (the token is used automatically).
+services:
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    container_name: abix-tunnel
+    restart: unless-stopped
+    depends_on: [nginx]
+    # token set -> fixed tunnel; token empty -> temporary trycloudflare.com link
+    command: >
+      sh -c 'if [ -n "$$CLOUDFLARE_TUNNEL_TOKEN" ]; then exec cloudflared tunnel --no-autoupdate run;
+             else exec cloudflared tunnel --no-autoupdate --url https://nginx:443 --no-tls-verify; fi'
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+      CLOUDFLARE_TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    networks: [abix-internal]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+  nginx:
+    volumes:
+      # The login rate limit must see each visitor's real address, not the tunnel's. Only active with this overlay.
+      - type: bind
+        source: ./deployment/nginx-realip.conf
+        target: /etc/nginx/conf.d/00-realip.conf
+        read_only: true
+        bind: {create_host_path: false}
