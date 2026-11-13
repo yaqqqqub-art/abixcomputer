@@ -50,6 +50,12 @@ with open(path, "w") as f:
 PY
 )
 chmod 600 "${ABIX_BACKEND_CONF:-/home/abix/.config/abix/backend.json}"
+
+# Compatibility for older API builds that still read /etc/abix/backend.json.
+# /etc/abix is owned by UID 1000 in the Blitz image.
+mkdir -p /etc/abix
+cp "${ABIX_BACKEND_CONF:-/home/abix/.config/abix/backend.json}" /etc/abix/backend.json
+chmod 600 /etc/abix/backend.json
 unset VNC_PASSWORD ABIX_ADMIN_HASH ABIX_SECRET ABIX_ADMIN_USER
 
 export DESKTOP_GEOMETRY
