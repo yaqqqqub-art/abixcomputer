@@ -1,0 +1,38 @@
+name: Unpack project source
+on:
+  push:
+    paths:
+      - ".github/workflows/unpack-source.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  unpack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+      - name: Extract source files into repository root
+        run: |
+          set -euo pipefail
+          test -f abix-cloud-computer-v6-slice1.zip
+          mkdir -p /tmp/abix-source
+          unzip -q abix-cloud-computer-v6-slice1.zip -d /tmp/abix-source
+          test -d /tmp/abix-source/abix-cloud-computer
+          cp -a /tmp/abix-source/abix-cloud-computer/. .
+          rm -f .env
+          rm -f abix-cloud-computer-v6-slice1.zip
+      - name: Commit extracted source
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "Add complete Abixcomputer source files"
+            git push
+          else
+            echo "No source changes to commit."
+          fi
