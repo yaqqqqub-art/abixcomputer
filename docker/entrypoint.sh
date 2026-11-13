@@ -1,5 +1,6 @@
 #!/bin/bash
 set -euo pipefail
+echo "[abix] entrypoint active (uid=$(id -u))"
 
 : "${VNC_PASSWORD:?VNC_PASSWORD is not set}"
 : "${DESKTOP_GEOMETRY:=1280x800}"
