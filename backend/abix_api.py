@@ -29,7 +29,7 @@ import abix_prefs
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs
 
-CONF_PATH = os.environ.get("ABIX_BACKEND_CONF", "/home/abix/.config/abix/backend.json")
+CONF_PATH = os.environ.get("ABIX_BACKEND_CONF", "/etc/abix/backend.json")
 CTL = os.environ.get("ABIX_CTL", "/usr/local/bin/abix-ctl")
 DESK_USER = os.environ.get("ABIX_DESKTOP_USER", "abix")          # "" = do not drop privileges (tests)
 DESK_HOME = os.environ.get("ABIX_DESKTOP_HOME", "/home/abix")
